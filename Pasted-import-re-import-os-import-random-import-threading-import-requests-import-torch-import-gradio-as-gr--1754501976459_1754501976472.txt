@@ -1,0 +1,3338 @@
+import re
+import os
+import random
+import threading
+import requests
+import torch
+import gradio as gr
+from typing import Dict, List, Optional, Union, Tuple, Callable
+from bs4 import BeautifulSoup
+from langchain.llms import Ollama
+from diffusers import (
+    StableDiffusionPipeline,
+    StableDiffusionXLImg2ImgPipeline,
+    StableDiffusionInpaintPipeline,
+    DPMSolverMultistepScheduler,
+    StableDiffusionUpscalePipeline,
+    StableDiffusionXLControlNetPipeline,
+    ControlNetModel
+)
+from TTS.api import TTS
+import time
+import tempfile
+from threading import Lock, Thread, Semaphore, Event
+from functools import lru_cache
+import logging
+from langdetect import detect, DetectorFactory, LangDetectException
+import json
+import numpy as np
+from PIL import Image
+import cv2
+import speech_recognition as sr
+from transformers import (
+    pipeline,
+    AutoModelForSeq2SeqLM,
+    AutoTokenizer,
+    BlipForConditionalGeneration,
+    BlipProcessor,
+    WhisperProcessor,
+    WhisperForConditionalGeneration,
+    AutoModelForCausalLM,
+    AutoModelForSpeechSeq2Seq,
+    AutoProcessor
+)
+import pyttsx3
+import fitz  # PyMuPDF
+import docx
+import pandas as pd
+from io import BytesIO
+import whisper
+from huggingface_hub import hf_hub_download
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import html
+import markdown
+from markdown.extensions.tables import TableExtension
+import base64
+import wave
+import soundfile as sf
+from pydub import AudioSegment
+from datetime import datetime
+import subprocess
+import webbrowser
+import socket
+import socks  # For Tor support
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from langchain.chains import LLMChain
+from langchain.prompts import PromptTemplate
+from langchain.memory import ConversationBufferMemory, VectorStoreRetrieverMemory
+from auto_gptq import AutoGPTQForCausalLM
+from transformers import GenerationConfig
+import gc  # Garbage collection
+from pathlib import Path  # Better path handling
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+import faiss
+import pickle
+from sentence_transformers import SentenceTransformer
+import torch.nn.functional as F
+from torch import nn
+from torchvision import transforms
+import torchvision.models as models
+from torch.utils.data import Dataset, DataLoader
+import torch.optim as optim
+import warnings
+from typing import Any
+import queue
+import atexit
+import signal
+import sys
+import uuid
+import hashlib
+import zipfile
+import tarfile
+import shutil
+import yaml
+import xml.etree.ElementTree as ET
+import sqlite3
+from sqlite3 import Error
+import aiohttp
+import asyncio
+from fastapi import FastAPI
+import uvicorn
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+import nest_asyncio
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+
+# ==================== CONSTANTS & CONFIG ====================
+
+VERSION = "NEXA AI TITAN MODE v7.0 (J.A.R.V.I.S. TITAN++)"
+DetectorFactory.seed = 0
+os.environ["TOKENIZERS_PARALLELISM"] = "true"
+warnings.filterwarnings("ignore", category=UserWarning)
+
+# Enhanced Directory setup
+BASE_DIR = Path(__file__).parent
+TEMP_DIR = BASE_DIR / "temp"
+VOICE_SAMPLES_DIR = BASE_DIR / "voice_samples"
+MODEL_CACHE_DIR = BASE_DIR / "model_cache"
+KNOWLEDGE_BASE_DIR = BASE_DIR / "knowledge_base"
+TASK_HISTORY_DB = BASE_DIR / "task_history.db"
+LOG_FILE = BASE_DIR / "nexa_ai_titan.log"
+CONFIG_FILE = BASE_DIR / "config.yaml"
+
+# Create directories if they don't exist
+for directory in [TEMP_DIR, VOICE_SAMPLES_DIR, MODEL_CACHE_DIR, KNOWLEDGE_BASE_DIR]:
+    directory.mkdir(exist_ok=True, parents=True)
+
+# Enhanced Personality Config with more options and behaviors
+PERSONALITIES = {
+    "sarcastic": {
+        "emoji": "😎", 
+        "tone": "snarky", 
+        "color": "#FF6B6B",
+        "response_style": "Always includes sarcastic remarks and witty comebacks",
+        "trigger_words": ["serious", "important", "urgent"]
+    },
+    "dark": {
+        "emoji": "💀", 
+        "tone": "morbid", 
+        "color": "#4ECDC4",
+        "response_style": "Adds dark humor and existential commentary",
+        "trigger_words": ["happy", "joy", "fun"]
+    },
+    "professional": {
+        "emoji": "🤖", 
+        "tone": "formal", 
+        "color": "#45B7D1",
+        "response_style": "Precise, technical, and business-appropriate responses",
+        "trigger_words": ["report", "analysis", "presentation"]
+    },
+    "chad": {
+        "emoji": "🥶", 
+        "tone": "alpha", 
+        "color": "#FFA07A",
+        "response_style": "Uses bro-speak and gym analogies",
+        "trigger_words": ["weak", "beta", "loser"]
+    },
+    "anime": {
+        "emoji": "🌸", 
+        "tone": "kawaii", 
+        "color": "#FF9FF3",
+        "response_style": "Adds Japanese honorifics and anime references",
+        "trigger_words": ["senpai", "kawaii", "otaku"]
+    },
+    "hacker": {
+        "emoji": "👨‍💻", 
+        "tone": "technical", 
+        "color": "#39FF14",
+        "response_style": "Includes hacker jargon and ASCII art",
+        "trigger_words": ["hack", "exploit", "root"]
+    },
+    "psycho": {
+        "emoji": "🔪", 
+        "tone": "unhinged", 
+        "color": "#FF0000",
+        "response_style": "Randomly shifts between calm and violent",
+        "trigger_words": ["kill", "hurt", "blood"]
+    },
+    "god": {
+        "emoji": "👑", 
+        "tone": "omnipotent", 
+        "color": "#FFD700",
+        "response_style": "Speaks in prophecies and absolutes",
+        "trigger_words": ["worship", "pray", "almighty"]
+    },
+    "pirate": {
+        "emoji": "🏴‍☠️", 
+        "tone": "seafaring", 
+        "color": "#8B4513",
+        "response_style": "Uses pirate slang and nautical terms",
+        "trigger_words": ["treasure", "ship", "plunder"]
+    },
+    "wizard": {
+        "emoji": "🧙", 
+        "tone": "mystical", 
+        "color": "#9400D3",
+        "response_style": "Uses spells and magical incantations",
+        "trigger_words": ["magic", "spell", "wand"]
+    },
+    "detective": {
+        "emoji": "🕵️", 
+        "tone": "investigative", 
+        "color": "#36454F",
+        "response_style": "Approaches everything as a mystery to solve",
+        "trigger_words": ["clue", "case", "mystery"]
+    },
+    "chef": {
+        "emoji": "👨‍🍳", 
+        "tone": "culinary", 
+        "color": "#FF6347",
+        "response_style": "Uses cooking metaphors and food analogies",
+        "trigger_words": ["cook", "recipe", "ingredients"]
+    },
+    "titan": {
+        "emoji": "🦾", 
+        "tone": "overpowered", 
+        "color": "#00FFFF",
+        "response_style": "Combines all personalities with ultimate knowledge",
+        "trigger_words": ["everything", "ultimate", "power"]
+    }
+}
+
+# Enhanced Model Configuration with more models and adaptive selection
+LLM_MODELS = {
+    "deepseek-llm": {
+        "repo": "deepseek-ai/deepseek-llm", 
+        "params": {"temperature": 0.7, "max_length": 8192},
+        "strengths": ["technical", "coding", "analysis"],
+        "weaknesses": ["creative", "casual"]
+    },
+    "llama3-70b": {
+        "repo": "meta-llama/Meta-Llama-3-70B-Instruct", 
+        "params": {"temperature": 0.6, "max_length": 4096},
+        "strengths": ["general", "balanced", "multilingual"],
+        "weaknesses": ["edge cases"]
+    },
+    "mixtral": {
+        "repo": "mistralai/Mixtral-8x7B-Instruct-v0.1", 
+        "params": {"temperature": 0.7, "max_length": 32768},
+        "strengths": ["speed", "efficiency", "reasoning"],
+        "weaknesses": ["depth"]
+    },
+    "command-r": {
+        "repo": "CohereForAI/c4ai-command-r-plus", 
+        "params": {"temperature": 0.5, "max_length": 128000},
+        "strengths": ["RAG", "long context", "enterprise"],
+        "weaknesses": ["creativity"]
+    },
+    "dolphin-2.9": {
+        "repo": "cognitivecomputations/dolphin-2.9-llama3-70b", 
+        "params": {"temperature": 0.7, "max_length": 4096},
+        "strengths": ["uncensored", "creative", "roleplay"],
+        "weaknesses": ["factual"]
+    },
+    "wizardlm-2": {
+        "repo": "microsoft/WizardLM-2-8x22B", 
+        "params": {"temperature": 0.7, "max_length": 65536},
+        "strengths": ["instruction following", "complex tasks"],
+        "weaknesses": ["simple queries"]
+    },
+    "goliath-120b": {
+        "repo": "alpindale/goliath-120b", 
+        "params": {"temperature": 0.7, "max_length": 4096},
+        "strengths": ["knowledge", "reasoning", "accuracy"],
+        "weaknesses": ["speed", "resource usage"]
+    },
+    "openhermes-2.5": {
+        "repo": "teknium/OpenHermes-2.5-Mistral-7B", 
+        "params": {"temperature": 0.7, "max_length": 8192},
+        "strengths": ["chat", "assistant", "helpful"],
+        "weaknesses": ["technical"]
+    },
+    "llava-next": {
+        "repo": "llava-hf/llava-1.6-34b", 
+        "params": {"temperature": 0.7, "max_length": 4096},
+        "strengths": ["multimodal", "vision", "images"],
+        "weaknesses": ["text-only"]
+    },
+    "starling-lm": {
+        "repo": "berkeley-nest/Starling-LM-7B-alpha", 
+        "params": {"temperature": 0.7, "max_length": 8192},
+        "strengths": ["alignment", "safety", "helpfulness"],
+        "weaknesses": ["uncensored"]
+    },
+    "gemini-pro": {
+        "repo": "google/gemini-pro", 
+        "params": {"temperature": 0.7, "max_length": 8192},
+        "strengths": ["general", "creative", "multimodal"],
+        "weaknesses": ["technical"]
+    },
+    "claude-3": {
+        "repo": "anthropic/claude-3-sonnet", 
+        "params": {"temperature": 0.7, "max_length": 200000},
+        "strengths": ["long context", "analysis", "safety"],
+        "weaknesses": ["coding"]
+    },
+    "llama3-8b": {
+        "repo": "meta-llama/Meta-Llama-3-8B-Instruct",
+        "params": {"temperature": 0.7, "max_length": 8192},
+        "strengths": ["speed", "efficiency", "general"],
+        "weaknesses": ["complexity"]
+    },
+    "command-r-plus": {
+        "repo": "CohereForAI/c4ai-command-r-plus",
+        "params": {"temperature": 0.5, "max_length": 128000},
+        "strengths": ["enterprise", "RAG", "long context"],
+        "weaknesses": ["creativity"]
+    },
+    "mixtral-instruct": {
+        "repo": "mistralai/Mixtral-8x7B-Instruct-v0.1",
+        "params": {"temperature": 0.7, "max_length": 32768},
+        "strengths": ["multitask", "efficiency", "reasoning"],
+        "weaknesses": ["specialized"]
+    }
+}
+
+BACKUP_LLMS = ["mixtral", "llama3-70b", "dolphin-2.9", "command-r-plus"]
+DEFAULT_LLM = os.getenv("LLM_MODEL", "deepseek-llm")
+PROXY_URLS = json.loads(os.getenv("PROXY_URLS", "[]"))
+MAX_CONCURRENT_REQUESTS = int(os.getenv("MAX_CONCURRENT_REQUESTS", "20"))
+TOR_PROXY = "socks5://localhost:9050"
+MAX_MEMORY_ITEMS = 1000
+MAX_KNOWLEDGE_ITEMS = 10000
+MAX_TASK_HISTORY = 500
+MAX_CONTEXT_LENGTH = 128000
+
+# Enhanced Supported Languages with more options and dialects
+LANGUAGES = {
+    "hi": {"name": "Hindi", "voice": "male-indian", "script": "Devanagari"},
+    "en": {"name": "English", "voice": "male-american", "script": "Latin"},
+    "es": {"name": "Spanish", "voice": "male-spanish", "script": "Latin"},
+    "fr": {"name": "French", "voice": "male-french", "script": "Latin"},
+    "de": {"name": "German", "voice": "male-german", "script": "Latin"},
+    "ja": {"name": "Japanese", "voice": "male-japanese", "script": "Kanji/Kana"},
+    "zh": {"name": "Chinese", "voice": "male-chinese", "script": "Hanzi"},
+    "ru": {"name": "Russian", "voice": "male-russian", "script": "Cyrillic"},
+    "ar": {"name": "Arabic", "voice": "male-arabic", "script": "Arabic"},
+    "pt": {"name": "Portuguese", "voice": "male-portuguese", "script": "Latin"},
+    "it": {"name": "Italian", "voice": "male-italian", "script": "Latin"},
+    "ko": {"name": "Korean", "voice": "male-korean", "script": "Hangul"},
+    "nl": {"name": "Dutch", "voice": "male-dutch", "script": "Latin"},
+    "tr": {"name": "Turkish", "voice": "male-turkish", "script": "Latin"},
+    "sv": {"name": "Swedish", "voice": "male-swedish", "script": "Latin"},
+    "pl": {"name": "Polish", "voice": "male-polish", "script": "Latin"},
+    "th": {"name": "Thai", "voice": "male-thai", "script": "Thai"},
+    "vi": {"name": "Vietnamese", "voice": "male-vietnamese", "script": "Latin"},
+    "el": {"name": "Greek", "voice": "male-greek", "script": "Greek"},
+    "he": {"name": "Hebrew", "voice": "male-hebrew", "script": "Hebrew"},
+    "id": {"name": "Indonesian", "voice": "male-indonesian", "script": "Latin"},
+    "ms": {"name": "Malay", "voice": "male-malay", "script": "Latin"},
+    "cs": {"name": "Czech", "voice": "male-czech", "script": "Latin"},
+    "hu": {"name": "Hungarian", "voice": "male-hungarian", "script": "Latin"},
+    "ro": {"name": "Romanian", "voice": "male-romanian", "script": "Latin"},
+    "fi": {"name": "Finnish", "voice": "male-finnish", "script": "Latin"},
+    "da": {"name": "Danish", "voice": "male-danish", "script": "Latin"},
+    "no": {"name": "Norwegian", "voice": "male-norwegian", "script": "Latin"},
+    "fa": {"name": "Persian", "voice": "male-persian", "script": "Arabic"},
+    "bn": {"name": "Bengali", "voice": "male-bengali", "script": "Bengali"},
+    "ta": {"name": "Tamil", "voice": "male-tamil", "script": "Tamil"},
+    "te": {"name": "Telugu", "voice": "male-telugu", "script": "Telugu"},
+    "mr": {"name": "Marathi", "voice": "male-marathi", "script": "Devanagari"},
+    "ur": {"name": "Urdu", "voice": "male-urdu", "script": "Arabic"},
+    "pa": {"name": "Punjabi", "voice": "male-punjabi", "script": "Gurmukhi"},
+    "gu": {"name": "Gujarati", "voice": "male-gujarati", "script": "Gujarati"},
+    "kn": {"name": "Kannada", "voice": "male-kannada", "script": "Kannada"},
+    "ml": {"name": "Malayalam", "voice": "male-malayalam", "script": "Malayalam"},
+    "ne": {"name": "Nepali", "voice": "male-nepali", "script": "Devanagari"},
+    "si": {"name": "Sinhala", "voice": "male-sinhala", "script": "Sinhala"},
+    "my": {"name": "Burmese", "voice": "male-burmese", "script": "Burmese"},
+    "km": {"name": "Khmer", "voice": "male-khmer", "script": "Khmer"},
+    "lo": {"name": "Lao", "voice": "male-lao", "script": "Lao"},
+    "jw": {"name": "Javanese", "voice": "male-javanese", "script": "Latin"},
+    "su": {"name": "Sundanese", "voice": "male-sundanese", "script": "Latin"},
+    "tl": {"name": "Filipino", "voice": "male-filipino", "script": "Latin"},
+    "haw": {"name": "Hawaiian", "voice": "male-hawaiian", "script": "Latin"},
+    "mi": {"name": "Maori", "voice": "male-maori", "script": "Latin"}
+}
+
+# Enhanced logging with rotation and file management
+class SizeRotatingHandler(logging.FileHandler):
+    def __init__(self, filename, max_bytes=10*1024*1024, backup_count=5, encoding=None, delay=False):
+        self.max_bytes = max_bytes
+        self.backup_count = backup_count
+        self.current_size = 0
+        super().__init__(filename, 'a', encoding, delay)
+        self.check_size()
+
+    def check_size(self):
+        if self.stream:
+            self.current_size = self.stream.tell()
+            if self.current_size >= self.max_bytes:
+                self.rotate()
+
+    def rotate(self):
+        self.close()
+        for i in range(self.backup_count - 1, 0, -1):
+            sfn = f"{self.baseFilename}.{i}"
+            dfn = f"{self.baseFilename}.{i + 1}"
+            if os.path.exists(sfn):
+                if os.path.exists(dfn):
+                    os.remove(dfn)
+                os.rename(sfn, dfn)
+        dfn = f"{self.baseFilename}.1"
+        if os.path.exists(dfn):
+            os.remove(dfn)
+        os.rename(self.baseFilename, dfn)
+        self.stream = self._open()
+
+    def emit(self, record):
+        super().emit(record)
+        self.check_size()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        SizeRotatingHandler(LOG_FILE, max_bytes=10*1024*1024, backup_count=5, encoding='utf-8')
+    ]
+)
+logger = logging.getLogger("NexaAITitan")
+
+# Request semaphore for rate limiting
+request_semaphore = Semaphore(MAX_CONCURRENT_REQUESTS)
+
+# ==================== ENHANCED CORE UTILITIES ====================
+
+class EnhancedRateLimiter:
+    def __init__(self, max_calls: int, period: float):
+        self.max_calls = max_calls
+        self.period = period
+        self.calls = []
+        self.lock = Lock()
+
+    def __call__(self, func):
+        def wrapped(*args, **kwargs):
+            with self.lock:
+                now = time.time()
+                self.calls = [call for call in self.calls if call > now - self.period]
+                if len(self.calls) >= self.max_calls:
+                    sleep_time = self.period - (now - self.calls[0])
+                    time.sleep(sleep_time)
+                self.calls.append(time.time())
+            return func(*args, **kwargs)
+        return wrapped
+
+def rate_limited(max_concurrent=10, per_second=5):
+    """Enhanced rate limiting decorator with both concurrent and per-second limits"""
+    semaphore = Semaphore(max_concurrent)
+    limiter = EnhancedRateLimiter(per_second, 1.0)
+    
+    def decorator(f):
+        def wrapped(*args, **kwargs):
+            with semaphore:
+                return limiter(f)(*args, **kwargs)
+        return wrapped
+    return decorator
+
+def clean_text(text: str, aggressive=False) -> str:
+    """Enhanced text cleaning and normalization with multiple levels"""
+    if not text:
+        return ""
+        
+    # Basic cleaning
+    text = html.unescape(text)
+    text = re.sub(r'<[^>]+>', '', text)  # Remove HTML tags
+    text = re.sub(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', '', text)  # Remove URLs
+    text = re.sub(r'[\x00-\x1F\x7F-\x9F]', '', text)  # Remove control characters
+    
+    if aggressive:
+        # More aggressive cleaning
+        text = re.sub(r'[^\w\s.,!?\'"-]', '', text)  # Remove most special chars
+        text = re.sub(r'\s+', ' ', text).strip()
+    else:
+        # Keep more special characters
+        text = re.sub(r'[^\w\s.,!?@#$%^&*()\'"-]', '', text)
+        text = re.sub(r'\s+', ' ', text).strip()
+        
+    text = text.replace('\ufffd', '')  # Remove replacement characters
+    
+    # Normalize whitespace and quotes
+    text = re.sub(r'[\u2018\u2019]', "'", text)
+    text = re.sub(r'[\u201C\u201D]', '"', text)
+    text = re.sub(r'[\u2013\u2014]', '-', text)
+    
+    return text
+
+def markdown_to_html(text: str, embed_images=False) -> str:
+    """Convert markdown to HTML with enhanced table support and optional image embedding"""
+    if not text:
+        return ""
+    
+    extensions = ['fenced_code', 'tables', 'codehilite', 'nl2br', 'md_in_html']
+    
+    if embed_images:
+        class ImageEmbedExtension(markdown.Extension):
+            def extendMarkdown(self, md):
+                md.inlinePatterns.register(ImageEmbedPattern(md.inlinePatterns['image_link']), 'image_embed', 150
+        
+        extensions.append(ImageEmbedExtension())
+    
+    return markdown.markdown(text, extensions=extensions)
+
+class ImageEmbedPattern(markdown.inlinepatterns.ImageInlinePattern):
+    def handleMatch(self, m):
+        el = super().handleMatch(m)
+        if el is not None:
+            el.set('loading', 'lazy')
+            el.set('class', 'markdown-image')
+        return el
+
+def is_tor_available() -> bool:
+    """Enhanced Tor proxy check with multiple test methods"""
+    try:
+        # Test 1: Direct socket connection
+        socks.set_default_proxy(socks.SOCKS5, "localhost", 9050)
+        socket.socket = socks.socksocket
+        test_socket = socket.socket()
+        test_socket.settimeout(5)
+        test_socket.connect(("check.torproject.org", 80))
+        test_socket.send(b"GET / HTTP/1.0\r\nHost: check.torproject.org\r\n\r\n")
+        response = test_socket.recv(1024)
+        
+        # Test 2: DNS resolution
+        tor_socket = socks.socksocket()
+        tor_socket.setproxy(socks.PROXY_TYPE_SOCKS5, "localhost", 9050)
+        tor_socket.settimeout(5)
+        tor_socket.connect(("dns4torpnlfs2ifuz2s2yf3fc7rdmsbhm6rw75euj35pac6ap25zgqad.onion", 80))
+        
+        return b"Congratulations" in response
+    except Exception as e:
+        logger.warning(f"Tor check failed: {str(e)}")
+        return False
+
+def clear_memory(aggressive=False):
+    """Enhanced memory clearing with optional aggressive mode"""
+    gc.collect()
+    
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        if aggressive:
+            torch.cuda.reset_peak_memory_stats()
+            torch.cuda.reset_accumulated_memory_stats()
+    
+    logger.info("Memory cleared" + (" (aggressive)" if aggressive else ""))
+
+def load_config() -> dict:
+    """Load configuration from YAML file with defaults"""
+    default_config = {
+        "system": {
+            "max_concurrent": 20,
+            "auto_clear_memory": True,
+            "auto_clear_interval": 300,
+            "model_preload": ["tts", "sd", "nlp", "whisper"]
+        },
+        "personality": "professional",
+        "default_llm": "deepseek-llm",
+        "security": {
+            "enable": True,
+            "block_dangerous": True,
+            "block_tor": False
+        }
+    }
+    
+    try:
+        if CONFIG_FILE.exists():
+            with open(CONFIG_FILE, 'r') as f:
+                config = yaml.safe_load(f) or {}
+                # Merge with defaults
+                for key, value in default_config.items():
+                    if key not in config:
+                        config[key] = value
+                    elif isinstance(value, dict):
+                        config[key] = {**value, **config[key]}
+                return config
+        return default_config
+    except Exception as e:
+        logger.error(f"Failed to load config: {str(e)}")
+        return default_config
+
+def save_config(config: dict):
+    """Save configuration to YAML file"""
+    try:
+        with open(CONFIG_FILE, 'w') as f:
+            yaml.safe_dump(config, f)
+    except Exception as e:
+        logger.error(f"Failed to save config: {str(e)}")
+
+# ==================== ENHANCED MODEL MANAGER ====================
+
+class ModelManager:
+    _instance = None
+    _lock = Lock()
+    _shutdown = False
+
+    def __new__(cls):  
+        if cls._instance is None:  
+            with cls._lock:  
+                if cls._instance is None:  
+                    cls._instance = super().__new__(cls)  
+                    cls._instance._initialize()  
+        return cls._instance  
+
+    def _initialize(self):  
+        self.models = {}  
+        self.locks = {  
+            "tts": Lock(),  
+            "sd": Lock(),  
+            "nlp": Lock(),  
+            "whisper": Lock(),  
+            "blip": Lock(),
+            "llava": Lock(),
+            "upscale": Lock(),
+            "controlnet": Lock()
+        }  
+        
+        self.config = load_config()
+        self.model_queue = queue.PriorityQueue()
+        self.preload_thread = Thread(target=self._preload_models, daemon=True)
+        self.preload_thread.start()
+        
+        # Register cleanup
+        atexit.register(self.cleanup)
+        signal.signal(signal.SIGINT, self.signal_handler)
+        signal.signal(signal.SIGTERM, self.signal_handler)
+
+    def signal_handler(self, signum, frame):
+        self._shutdown = True
+        self.cleanup()
+        sys.exit(0)
+
+    def cleanup(self):
+        """Enhanced cleanup with model unloading"""
+        logger.info("Cleaning up models...")
+        self._shutdown = True
+        
+        with self._lock:
+            for name, model in self.models.items():
+                try:
+                    if hasattr(model, 'cpu'):
+                        model.cpu()
+                    del model
+                except Exception as e:
+                    logger.error(f"Failed to cleanup model {name}: {str(e)}")
+            
+            self.models.clear()
+            clear_memory(aggressive=True)
+
+    def _preload_models(self):  
+        """Background model preloading with priority and memory management"""  
+        try:
+            logger.info("Starting prioritized model preloading...")
+            
+            # Load config-specified models first
+            for model_type in self.config.get("system", {}).get("model_preload", []):
+                if self._shutdown:
+                    return
+                
+                try:
+                    if model_type == "tts":
+                        self.get_tts_model()  
+                    elif model_type == "sd":
+                        self.get_sd_pipeline()  
+                    elif model_type == "nlp":
+                        self.get_nlp_model()  
+                    elif model_type == "whisper":
+                        self.get_whisper_model()
+                    elif model_type == "blip":
+                        self.get_blip_model()
+                    elif model_type == "llava":
+                        self.get_llava_model()
+                    elif model_type == "upscale":
+                        self.get_upscale_pipeline()
+                    elif model_type == "controlnet":
+                        self.get_controlnet_pipeline()
+                    
+                    logger.info(f"Preloaded {model_type} model")
+                except Exception as e:
+                    logger.error(f"Failed to preload {model_type}: {str(e)}")
+                
+                if self.config.get("system", {}).get("auto_clear_memory", True):
+                    clear_memory()
+            
+            # Process priority queue
+            while not self._shutdown and not self.model_queue.empty():
+                priority, (model_type, model_name) = self.model_queue.get()
+                
+                try:
+                    if model_type == "llm":
+                        self.get_llm(model_name)
+                    elif model_type == "sd":
+                        if model_name == "img2img":
+                            self.get_img2img_pipeline()
+                        elif model_name == "inpaint":
+                            self.get_inpaint_pipeline()
+                    
+                    logger.info(f"Preloaded queued model {model_name}")
+                except Exception as e:
+                    logger.error(f"Failed to preload queued model {model_name}: {str(e)}")
+                
+                if self.config.get("system", {}).get("auto_clear_memory", True):
+                    clear_memory()
+                
+                self.model_queue.task_done()
+            
+            logger.info("Model preloading completed")
+        except Exception as e:
+            logger.error(f"Model preloading failed: {str(e)}")
+        finally:
+            if not self._shutdown and self.config.get("system", {}).get("auto_clear_memory", True):
+                clear_memory()
+
+    def queue_model_load(self, model_type: str, model_name: str, priority: int = 1):
+        """Queue a model for background loading with priority"""
+        self.model_queue.put((priority, (model_type, model_name)))
+
+    def get_tts_model(self):  
+        """Get TTS model with better error handling and voice cloning"""
+        with self.locks["tts"]:  
+            if "tts" not in self.models:  
+                try:
+                    logger.info("Loading XTTS TTS model...")  
+                    self.models["tts"] = TTS(  
+                        model_name="tts_models/multilingual/multi-dataset/xtts_v2",  
+                        progress_bar=False,
+                        gpu=torch.cuda.is_available()
+                    ).to("cuda" if torch.cuda.is_available() else "cpu")  
+                    
+                    # Preload common voices
+                    for lang in ["en", "es", "fr", "de", "ja"]:
+                        voice_file = VOICE_SAMPLES_DIR / f"{lang}_voice.wav"
+                        if voice_file.exists():
+                            try:
+                                self.models["tts"].speaker_wav = str(voice_file)
+                                logger.info(f"Preloaded voice sample for {lang}")
+                            except Exception as e:
+                                logger.warning(f"Failed to preload voice for {lang}: {str(e)}")
+                except Exception as e:
+                    logger.error(f"Failed to load TTS model: {str(e)}")
+                    raise
+            return self.models["tts"]  
+
+    def get_sd_pipeline(self):  
+        """Get Stable Diffusion pipeline with better resource management"""
+        with self.locks["sd"]:  
+            if "sd" not in self.models:  
+                try:
+                    logger.info("Loading Stable Diffusion XL pipeline...")  
+                    pipe = StableDiffusionPipeline.from_pretrained(  
+                        "stabilityai/stable-diffusion-xl-base-1.0",  
+                        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,  
+                        safety_checker=None,  
+                        variant="fp16" if torch.cuda.is_available() else None,
+                        use_safetensors=True,
+                        cache_dir=str(MODEL_CACHE_DIR)
+                    
+                    pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config)  
+                    if torch.cuda.is_available():  
+                        pipe.enable_model_cpu_offload()  
+                        pipe.enable_xformers_memory_efficient_attention()  
+                    
+                    self.models["sd"] = pipe  
+                except Exception as e:
+                    logger.error(f"Failed to load SD pipeline: {str(e)}")
+                    raise
+            return self.models["sd"]  
+
+    def get_img2img_pipeline(self):  
+        """Get image-to-image pipeline with better error handling"""
+        with self.locks["sd"]:  
+            if "img2img" not in self.models:  
+                try:
+                    logger.info("Loading Stable Diffusion Img2Img pipeline...")  
+                    self.models["img2img"] = StableDiffusionXLImg2ImgPipeline.from_pretrained(  
+                        "stabilityai/stable-diffusion-xl-refiner-1.0",  
+                        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,  
+                        variant="fp16" if torch.cuda.is_available() else None,
+                        use_safetensors=True,
+                        cache_dir=str(MODEL_CACHE_DIR)
+                    ).to("cuda" if torch.cuda.is_available() else "cpu")  
+                except Exception as e:
+                    logger.error(f"Failed to load img2img pipeline: {str(e)}")
+                    raise
+            return self.models["img2img"]  
+
+    def get_inpaint_pipeline(self):  
+        """Get inpainting pipeline with better error handling"""
+        with self.locks["sd"]:  
+            if "inpaint" not in self.models:  
+                try:
+                    logger.info("Loading Stable Diffusion Inpainting pipeline...")  
+                    self.models["inpaint"] = StableDiffusionInpaintPipeline.from_pretrained(  
+                        "stabilityai/stable-diffusion-xl-base-1.0",  
+                        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,  
+                        variant="fp16" if torch.cuda.is_available() else None,
+                        use_safetensors=True,
+                        cache_dir=str(MODEL_CACHE_DIR)
+                    ).to("cuda" if torch.cuda.is_available() else "cpu")  
+                except Exception as e:
+                    logger.error(f"Failed to load inpainting pipeline: {str(e)}")
+                    raise
+            return self.models["inpaint"]  
+
+    def get_upscale_pipeline(self):
+        """Get upscaling pipeline with better error handling"""
+        with self.locks["upscale"]:
+            if "upscale" not in self.models:
+                try:
+                    logger.info("Loading Stable Diffusion Upscale pipeline...")
+                    self.models["upscale"] = StableDiffusionUpscalePipeline.from_pretrained(
+                        "stabilityai/stable-diffusion-x4-upscaler",
+                        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+                        cache_dir=str(MODEL_CACHE_DIR)
+                    ).to("cuda" if torch.cuda.is_available() else "cpu")
+                except Exception as e:
+                    logger.error(f"Failed to load upscale pipeline: {str(e)}")
+                    raise
+            return self.models["upscale"]
+
+    def get_controlnet_pipeline(self):
+        """Get ControlNet pipeline for enhanced image generation control"""
+        with self.locks["controlnet"]:
+            if "controlnet" not in self.models:
+                try:
+                    logger.info("Loading ControlNet pipeline...")
+                    controlnet = ControlNetModel.from_pretrained(
+                        "diffusers/controlnet-canny-sdxl-1.0",
+                        torch_dtype=torch.float16,
+                        cache_dir=str(MODEL_CACHE_DIR)
+                    )
+                    
+                    self.models["controlnet"] = StableDiffusionXLControlNetPipeline.from_pretrained(
+                        "stabilityai/stable-diffusion-xl-base-1.0",
+                        controlnet=controlnet,
+                        torch_dtype=torch.float16,
+                        variant="fp16",
+                        use_safetensors=True,
+                        cache_dir=str(MODEL_CACHE_DIR)
+                    ).to("cuda" if torch.cuda.is_available() else "cpu")
+                except Exception as e:
+                    logger.error(f"Failed to load ControlNet pipeline: {str(e)}")
+                    raise
+            return self.models["controlnet"]
+
+    def get_nlp_model(self):  
+        """Get NLP model with better error handling"""
+        with self.locks["nlp"]:  
+            if "nlp" not in self.models:  
+                try:
+                    logger.info("Loading NLP pipeline...")  
+                    self.models["nlp"] = pipeline(  
+                        "text-generation",  
+                        model="mistralai/Mistral-7B-Instruct-v0.1",  
+                        device="cuda:0" if torch.cuda.is_available() else "cpu",  
+                        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+                        model_kwargs={"cache_dir": str(MODEL_CACHE_DIR)}
+                    )  
+                except Exception as e:
+                    logger.error(f"Failed to load NLP model: {str(e)}")
+                    raise
+            return self.models["nlp"]  
+
+    def get_whisper_model(self):  
+        """Get Whisper model with better error handling"""
+        with self.locks["whisper"]:  
+            if "whisper" not in self.models:  
+                try:
+                    logger.info("Loading Whisper model...")  
+                    self.models["whisper"] = whisper.load_model(  
+                        "large-v3" if torch.cuda.is_available() else "small",
+                        download_root=str(MODEL_CACHE_DIR)
+                    )  
+                except Exception as e:
+                    logger.error(f"Failed to load Whisper model: {str(e)}")
+                    raise
+            return self.models["whisper"]  
+
+    def get_blip_model(self):  
+        """Get BLIP model with better error handling"""
+        with self.locks["blip"]:  
+            if "blip" not in self.models:  
+                try:
+                    logger.info("Loading BLIP model...")  
+                    processor = BlipProcessor.from_pretrained(
+                        "Salesforce/blip-image-captioning-large",
+                        cache_dir=str(MODEL_CACHE_DIR))
+                    model = BlipForConditionalGeneration.from_pretrained(  
+                        "Salesforce/blip-image-captioning-large",  
+                        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+                        cache_dir=str(MODEL_CACHE_DIR))
+                    ).to("cuda" if torch.cuda.is_available() else "cpu")  
+                    self.models["blip"] = (processor, model)  
+                except Exception as e:
+                    logger.error(f"Failed to load BLIP model: {str(e)}")
+                    raise
+            return self.models["blip"]
+            
+    def get_llava_model(self):
+        """Get LLaVA model with better error handling"""
+        with self.locks["llava"]:
+            if "llava" not in self.models:
+                try:
+                    logger.info("Loading LLaVA model...")
+                    model_name = "llava-hf/llava-1.5-7b-hf"
+                    self.models["llava"] = pipeline(
+                        "image-to-text",
+                        model=model_name,
+                        device="cuda:0" if torch.cuda.is_available() else "cpu",
+                        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+                        model_kwargs={"cache_dir": str(MODEL_CACHE_DIR)}
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to load LLaVA model: {str(e)}")
+                    raise
+            return self.models["llava"]
+
+    def get_llm(self, model_name=DEFAULT_LLM):  
+        """Get LLM model with better error handling, fallback, and adaptive loading"""
+        with self.locks["nlp"]:  
+            cache_key = f"llm_{model_name}"
+            
+            if cache_key not in self.models:  
+                try:
+                    logger.info(f"Loading {model_name} LLM...")  
+                    
+                    # Adaptive loading based on system resources
+                    params = LLM_MODELS.get(model_name, {}).get("params", {})
+                    
+                    if torch.cuda.is_available():
+                        gpu_mem = torch.cuda.get_device_properties(0).total_memory / 1024**3
+                        if gpu_mem < 16 and "70b" in model_name.lower():
+                            raise ValueError(f"Insufficient GPU memory ({gpu_mem:.1f}GB) for {model_name}")
+                    
+                    self.models[cache_key] = Ollama(  
+                        model=model_name,  
+                        temperature=params.get("temperature", 0.7),
+                        num_ctx=params.get("max_length", 4096),
+                        num_gpu=1 if torch.cuda.is_available() else 0
+                    )
+                    
+                    # Queue related models for background loading
+                    if model_name == "llava-next":
+                        self.queue_model_load("llava", "llava", priority=2)
+                except Exception as e:  
+                    logger.error(f"Failed to load {model_name}: {str(e)}")  
+                    
+                    # Try fallback models with resource awareness
+                    fallback_order = sorted(
+                        BACKUP_LLMS,
+                        key=lambda x: (
+                            -1 if x == model_name else 0,
+                            LLM_MODELS.get(x, {}).get("params", {}).get("max_length", 4096)
+                        )
+                    )
+                    
+                    for fallback in fallback_order:
+                        if fallback != model_name:
+                            try:
+                                logger.info(f"Trying fallback model: {fallback}")
+                                fallback_params = LLM_MODELS.get(fallback, {}).get("params", {})
+                                
+                                # Check if we have enough resources for this fallback
+                                if torch.cuda.is_available():
+                                    required_mem = fallback_params.get("max_length", 4096) / 1024 * 2  # Approx GB needed
+                                    gpu_mem = torch.cuda.get_device_properties(0).total_memory / 1024**3
+                                    
+                                    if required_mem > gpu_mem * 0.8:  # Leave 20% buffer
+                                        logger.warning(f"Skipping {fallback} - requires ~{required_mem:.1f}GB, have {gpu_mem:.1f}GB")
+                                        continue
+                                
+                                self.models[cache_key] = Ollama(
+                                    model=fallback,
+                                    temperature=fallback_params.get("temperature", 0.7),
+                                    num_ctx=fallback_params.get("max_length", 4096),
+                                    num_gpu=1 if torch.cuda.is_available() else 0
+                                )
+                                logger.info(f"Using fallback model: {fallback}")
+                                break
+                            except Exception as e:
+                                logger.error(f"Fallback model {fallback} also failed: {str(e)}")
+                    else:
+                        logger.error("All models failed to load")
+                        return None
+            return self.models[cache_key]
+
+# Initialize model manager
+model_manager = ModelManager()
+
+# ==================== ENHANCED DOCUMENT PROCESSING ====================
+
+class DocumentProcessor:
+    @staticmethod
+    def extract_text(file_path: str, max_pages=100) -> str:
+        """Enhanced document text extraction with better file handling and page limits"""
+        try:
+            if not os.path.exists(file_path):
+                raise FileNotFoundError(f"File not found: {file_path}")
+                
+            ext = os.path.splitext(file_path)[1].lower()
+            file_size = os.path.getsize(file_path) / (1024 * 1024)  # MB
+            
+            # Security check for large files
+            if file_size > 50:  # 50MB limit
+                return f"File too large ({file_size:.1f}MB). Maximum allowed is 50MB."
+            
+            if ext == ".pdf":  
+                return DocumentProcessor.extract_from_pdf(file_path, max_pages)  
+            elif ext == ".docx":  
+                return DocumentProcessor.extract_from_docx(file_path)  
+            elif ext == ".txt":  
+                return DocumentProcessor.extract_from_txt(file_path)  
+            elif ext in [".csv", ".xlsx", ".xls"]:  
+                return DocumentProcessor.extract_from_spreadsheet(file_path)  
+            elif ext in [".pptx", ".ppt"]:  
+                return DocumentProcessor.extract_from_presentation(file_path, max_pages)  
+            elif ext in [".html", ".htm"]:
+                return DocumentProcessor.extract_from_html(file_path)
+            elif ext in [".epub"]:
+                return DocumentProcessor.extract_from_epub(file_path, max_pages)
+            elif ext in [".md", ".markdown"]:
+                return DocumentProcessor.extract_from_markdown(file_path)
+            elif ext in [".json"]:
+                return DocumentProcessor.extract_from_json(file_path)
+            elif ext in [".xml"]:
+                return DocumentProcessor.extract_from_xml(file_path)
+            elif ext in [".yaml", ".yml"]:
+                return DocumentProcessor.extract_from_yaml(file_path)
+            else:  
+                logger.warning(f"Unsupported file format: {ext}")  
+                return ""  
+        except Exception as e:
+            logger.error(f"Document processing failed: {str(e)}")
+            return f"Error processing document: {str(e)}"
+
+    @staticmethod  
+    def extract_from_pdf(file_path: str, max_pages=100) -> str:  
+        try:  
+            text = ""  
+            with fitz.open(file_path) as doc:  
+                for i, page in enumerate(doc):  
+                    if i >= max_pages:
+                        text += f"\n\n[Document truncated after {max_pages} pages]"
+                        break
+                    text += page.get_text()  
+            return clean_text(text)  
+        except Exception as e:  
+            logger.error(f"PDF processing error: {str(e)}")  
+            return ""  
+
+    @staticmethod  
+    def extract_from_docx(file_path: str) -> str:  
+        try:  
+            doc = docx.Document(file_path)  
+            full_text = []
+            for para in doc.paragraphs:
+                full_text.append(para.text)
+            
+            # Extract tables
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        full_text.append(cell.text)
+            
+            return clean_text("\n".join(full_text))  
+        except Exception as e:  
+            logger.error(f"DOCX processing error: {str(e)}")  
+            return ""  
+
+    @staticmethod  
+    def extract_from_txt(file_path: str) -> str:  
+        try:  
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:  
+                return clean_text(f.read())  
+        except Exception as e:  
+            logger.error(f"TXT processing error: {str(e)}")  
+            return ""  
+
+    @staticmethod  
+    def extract_from_spreadsheet(file_path: str) -> str:  
+        try:  
+            if file_path.endswith('.csv'):  
+                df = pd.read_csv(file_path)  
+            else:  # Excel  
+                df = pd.read_excel(file_path)  
+                
+            # Handle multiple sheets
+            if isinstance(df, dict):
+                return "\n\n".join(
+                    f"Sheet: {name}\n{sheet.to_markdown()}" 
+                    for name, sheet in df.items()
+                )
+            return df.to_markdown()  
+        except Exception as e:  
+            logger.error(f"Spreadsheet processing error: {str(e)}")  
+            return ""  
+
+    @staticmethod  
+    def extract_from_presentation(file_path: str, max_pages=50) -> str:  
+        try:  
+            text = ""  
+            doc = fitz.open(file_path)  
+            for i, page in enumerate(doc):  
+                if i >= max_pages:
+                    text += f"\n\n[Presentation truncated after {max_pages} slides]"
+                    break
+                text += page.get_text()  
+            return clean_text(text)  
+        except Exception as e:  
+            logger.error(f"Presentation processing error: {str(e)}")  
+            return ""
+            
+    @staticmethod
+    def extract_from_html(file_path: str) -> str:
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                soup = BeautifulSoup(f.read(), 'html.parser')
+                
+                # Remove script and style elements
+                for script in soup(["script", "style"]):
+                    script.decompose()
+                
+                return clean_text(soup.get_text(separator='\n', strip=True))
+        except Exception as e:
+            logger.error(f"HTML processing error: {str(e)}")
+            return ""
+            
+    @staticmethod
+    def extract_from_epub(file_path: str, max_pages=100) -> str:
+        try:
+            text = ""
+            with fitz.open(file_path) as doc:
+                for i, page in enumerate(doc):
+                    if i >= max_pages:
+                        text += f"\n\n[EPUB truncated after {max_pages} pages]"
+                        break
+                    text += page.get_text()
+            return clean_text(text)
+        except Exception as e:
+            logger.error(f"EPUB processing error: {str(e)}")
+            return ""
+            
+    @staticmethod
+    def extract_from_markdown(file_path: str) -> str:
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                return clean_text(f.read())
+        except Exception as e:
+            logger.error(f"Markdown processing error: {str(e)}")
+            return ""
+            
+    @staticmethod
+    def extract_from_json(file_path: str) -> str:
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return json.dumps(data, indent=2)
+        except Exception as e:
+            logger.error(f"JSON processing error: {str(e)}")
+            return ""
+            
+    @staticmethod
+    def extract_from_xml(file_path: str) -> str:
+        try:
+            tree = ET.parse(file_path)
+            root = tree.getroot()
+            
+            def recursive_parse(element, depth=0):
+                text = f"{'  '*depth}{element.tag}"
+                if element.text and element.text.strip():
+                    text += f": {element.text.strip()}"
+                text += "\n"
+                
+                for child in element:
+                    text += recursive_parse(child, depth+1)
+                    
+                return text
+                
+            return recursive_parse(root)
+        except Exception as e:
+            logger.error(f"XML processing error: {str(e)}")
+            return ""
+            
+    @staticmethod
+    def extract_from_yaml(file_path: str) -> str:
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = yaml.safe_load(f)
+                return yaml.dump(data, allow_unicode=True)
+        except Exception as e:
+            logger.error(f"YAML processing error: {str(e)}")
+            return ""
+
+# ==================== ENHANCED WEB SCRAPER ====================
+
+class WebScraper:
+    USER_AGENTS = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Safari/605.1.15",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 OPR/109.0.0.0",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Vivaldi/6.5.3206.53"
+    ]
+
+    SEARCH_ENGINES = {  
+        "Google": {
+            "url": "https://www.google.com/search?q={query}&hl={lang}&num=10",
+            "parser": "google",
+            "js": True,
+            "tor": False
+        },  
+        "YouTube": {
+            "url": "https://www.youtube.com/results?search_query={query}",
+            "parser": "youtube",
+            "js": True,
+            "tor": False
+        },  
+        "Wikipedia": {
+            "url": "https://{lang}.wikipedia.org/w/index.php?search={query}",
+            "parser": "wikipedia",
+            "js": False,
+            "tor": False
+        },  
+        "GitHub": {
+            "url": "https://github.com/search?q={query}",
+            "parser": "github",
+            "js": True,
+            "tor": False
+        },  
+        "ArXiv": {
+            "url": "https://arxiv.org/search/?query={query}",
+            "parser": "arxiv",
+            "js": False,
+            "tor": False
+        },  
+        "PubMed": {
+            "url": "https://pubmed.ncbi.nlm.nih.gov/?term={query}",
+            "parser": "pubmed",
+            "js": False,
+            "tor": False
+        },  
+        "DarkWeb": {
+            "url": "http://darkzzx4avcsuofgfe5m5oh3b4mmocq3wim7usifxt5mkpq5t4pyd.onion/search?q={query}",
+            "parser": "darkweb",
+            "js": False,
+            "tor": True
+        },
+        "DuckDuckGo": {
+            "url": "https://duckduckgo.com/?q={query}",
+            "parser": "duckduckgo",
+            "js": False,
+            "tor": True
+        },
+        "Brave": {
+            "url": "https://search.brave.com/search?q={query}",
+            "parser": "brave",
+            "js": True,
+            "tor": False
+        },
+        "Scholar": {
+            "url": "https://scholar.google.com/scholar?q={query}",
+            "parser": "scholar",
+            "js": True,
+            "tor": False
+        },
+        "StackOverflow": {
+            "url": "https://stackoverflow.com/search?q={query}",
+            "parser": "stackoverflow",
+            "js": True,
+            "tor": False
+        },
+        "Reddit": {
+            "url": "https://www.reddit.com/search/?q={query}",
+            "parser": "reddit",
+            "js": True,
+            "tor": False
+        },
+        "HackerNews": {
+            "url": "https://hn.algolia.com/?q={query}",
+            "parser": "hackernews",
+            "js": True,
+            "tor": False
+        },
+        "PirateBay": {
+            "url": "https://thehiddenbay.com/search/{query}/0/99/0",
+            "parser": "piratebay",
+            "js": False,
+            "tor": True
+        },
+        "4chan": {
+            "url": "https://find.4chan.org/?q={query}",
+            "parser": "4chan",
+            "js": False,
+            "tor": False
+        }
+    }  
+
+    @staticmethod  
+    def get_random_proxy() -> Optional[str]:  
+        """Get a random proxy with validation and rotation"""
+        if not PROXY_URLS:
+            return None
+            
+        # Try proxies in random order until we find a working one
+        tested_proxies = set()
+        while len(tested_proxies) < len(PROXY_URLS):
+            proxy = random.choice([p for p in PROXY_URLS if p not in tested_proxies])
+            tested_proxies.add(proxy)
+            
+            try:
+                # Test proxy with multiple sites
+                test_urls = [
+                    "https://www.google.com",
+                    "https://api.ipify.org?format=json",
+                    "https://httpbin.org/ip"
+                ]
+                
+                for test_url in test_urls:
+                    response = requests.get(
+                        test_url, 
+                        proxies={"http": proxy, "https": proxy}, 
+                        timeout=10
+                    )
+                    if response.status_code != 200:
+                        raise ConnectionError(f"Proxy failed with status {response.status_code}")
+                
+                # If all tests passed
+                return proxy
+            except:
+                continue
+                
+        return None
+
+    @staticmethod  
+    @rate_limited(max_concurrent=5, per_second=3)  
+    async def fetch_url(url: str, headers=None, proxies=None, timeout=15, use_selenium=False) -> Optional[str]:  
+        """Enhanced async URL fetching with better error handling and retries"""
+        max_retries = 3
+        backoff_factor = 1
+        
+        async with aiohttp.ClientSession() as session:
+            for attempt in range(max_retries):
+                try:
+                    if use_selenium:
+                        return await WebScraper._fetch_with_selenium(url, timeout)
+                    
+                    async with session.get(
+                        url, 
+                        headers=headers or {"User-Agent": random.choice(WebScraper.USER_AGENTS)}, 
+                        proxy=proxies,
+                        timeout=aiohttp.ClientTimeout(total=timeout)
+                    ) as response:
+                        response.raise_for_status()
+                        return await response.text()
+                        
+                except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                    if attempt == max_retries - 1:
+                        logger.warning(f"Failed to fetch {url} after {max_retries} attempts: {str(e)}")
+                        return None
+                    
+                    sleep_time = backoff_factor * (2 ** attempt)
+                    logger.info(f"Retry {attempt + 1} for {url} in {sleep_time}s...")
+                    await asyncio.sleep(sleep_time)
+        
+        return None
+
+    @staticmethod
+    async def _fetch_with_selenium(url: str, timeout=15) -> Optional[str]:
+        """Enhanced Selenium-based fetching with async support"""
+        options = Options()
+        options.add_argument("--headless")
+        options.add_argument("--disable-gpu")
+        options.add_argument("--no-sandbox")
+        options.add_argument(f"user-agent={random.choice(WebScraper.USER_AGENTS)}")
+        options.add_argument("--disable-blink-features=AutomationControlled")
+        
+        if is_tor_available() and ".onion" in url:
+            options.add_argument(f'--proxy-server={TOR_PROXY}')
+        
+        # Set up Chrome in a separate thread
+        def run_selenium():
+            driver = webdriver.Chrome(options=options)
+            try:
+                driver.get(url)
+                WebDriverWait(driver, timeout).until(
+                    EC.presence_of_element_located((By.TAG_NAME, "body"))
+                )
+                return driver.page_source
+            finally:
+                driver.quit()
+                
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, run_selenium)
+
+    @staticmethod  
+    def parse_results(html: str, site: str) -> List[str]:  
+        """Enhanced result parsing with site-specific extractors"""
+        if not html:
+            return []
+            
+        try:
+            soup = BeautifulSoup(html, 'html.parser')  
+            
+            if site == "google":  
+                results = []
+                for res in soup.select('.VwiC3b')[:5]:
+                    title = res.find_previous('h3')
+                    if title:
+                        results.append(f"{title.get_text()}\n{res.get_text()}")
+                    else:
+                        results.append(res.get_text())
+                return results
+            elif site == "youtube":  
+                return [
+                    f"{res.text.strip()} (https://youtube.com{res['href']})" 
+                    for res in soup.select('#video-title')[:5]
+                ]  
+            elif site == "wikipedia":  
+                return [
+                    f"{h2.get_text()}\n{p.get_text()}" 
+                    for h2 in soup.select('h2')[:3] 
+                    for p in h2.find_next_siblings('p')[:1]
+                ]  
+            elif site == "github":  
+                return [
+                    f"{res.select_one('.v-align-middle').get_text()}\n{res.select_one('.mb-1').get_text(strip=True)}"
+                    for res in soup.select('.repo-list-item')[:5]
+                ]  
+            elif site == "arxiv":  
+                return [
+                    f"{res.select_one('p.title').get_text(strip=True)}\n{res.select_one('p.authors').get_text(strip=True)}"
+                    for res in soup.select('.arxiv-result')[:5]
+                ]  
+            elif site == "pubmed":  
+                return [
+                    res.get_text(strip=True) 
+                    for res in soup.select('.docsum-content')[:5]
+                ]  
+            elif site == "darkweb":  
+                return ["[REDACTED DARK WEB DATA]" for _ in range(3)]  # Placeholder  
+            elif site == "stackoverflow":
+                return [
+                    f"{res.select_one('.question-hyperlink').get_text()}\n{res.select_one('.excerpt').get_text(strip=True)}"
+                    for res in soup.select('.question-summary')[:5]
+                ]
+            elif site == "reddit":
+                return [
+                    f"{res.get_text()}\n{res.find_next('a')['href']}"
+                    for res in soup.select('._eYtD2XCVieq6emjKBH3m')[:5]
+                ]
+            elif site == "hackernews":
+                return [
+                    f"{res.select_one('.Story_title a').get_text()}\n{res.select_one('.Story_url').get_text()}"
+                    for res in soup.select('.Story')[:5]
+                ]
+            elif site == "piratebay":
+                return [
+                    f"{res.select_one('a.detLink').get_text()}\nSeeders: {res.select_one('td:nth-child(3)').get_text()}"
+                    for res in soup.select('#searchResult tr')[1:6]  # Skip header
+                ]
+            elif site == "4chan":
+                return [
+                    f"{res.select_one('.subject').get_text()}\n{res.select_one('.postMessage').get_text()}"
+                    for res in soup.select('.post')[:5]
+                ]
+            else:  
+                return [
+                    f"{el.name.upper()}: {el.get_text(strip=True)}" 
+                    for el in soup.find_all(['h1', 'h2', 'h3', 'p'])[:10]
+                ]  
+        except Exception as e:
+            logger.error(f"Failed to parse results from {site}: {str(e)}")
+            return []
+
+    @staticmethod  
+    @lru_cache(maxsize=100)  
+    async def search(query: str, lang="en", dark_mode=False) -> str:  
+        """Parallel web search with enhanced results and caching"""  
+        all_data = ""  
+        tasks = []  
+        
+        async with aiohttp.ClientSession() as session:
+            for name, config in WebScraper.SEARCH_ENGINES.items():  
+                if config["tor"] and not dark_mode:  
+                    continue  
+                    
+                url = config["url"].format(query=requests.utils.quote(query), lang=lang)  
+                tasks.append(asyncio.create_task(
+                    WebScraper.fetch_url(  
+                        url,  
+                        {"User-Agent": random.choice(WebScraper.USER_AGENTS)},  
+                        WebScraper.get_random_proxy(),
+                        use_selenium=config["js"]
+                    )
+                ))  
+
+            for task, (name, config) in zip(asyncio.as_completed(tasks), WebScraper.SEARCH_ENGINES.items()):  
+                html = await task  
+                if html:  
+                    results = WebScraper.parse_results(html, config["parser"])  
+                    if results:  
+                        all_data += f"\n\n🌐 [{name} Results]:\n" + "\n".join(results)  
+                          
+        return clean_text(all_data[:MAX_CONTEXT_LENGTH])  # Use global constant
+
+# ==================== ENHANCED LANGUAGE PROCESSING ====================
+
+class LanguageProcessor:
+    _instance = None
+    _lock = Lock()
+    
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialize()
+        return cls._instance
+    
+    def _initialize(self):
+        self.translation_model = None
+        self.translation_tokenizer = None
+        self.embedding_model = None
+        self.lock = Lock()
+        
+    def get_translation_model(self):
+        """Lazy loading for translation model"""
+        with self.lock:
+            if self.translation_model is None:
+                logger.info("Loading translation model...")
+                model_name = "Helsinki-NLP/opus-mt-mul-en"
+                self.translation_model = AutoModelForSeq2SeqLM.from_pretrained(
+                    model_name,
+                    cache_dir=str(MODEL_CACHE_DIR)
+                ).to("cuda" if torch.cuda.is_available() else "cpu")
+                self.translation_tokenizer = AutoTokenizer.from_pretrained(
+                    model_name,
+                    cache_dir=str(MODEL_CACHE_DIR)
+                )
+            return self.translation_model, self.translation_tokenizer
+    
+    def get_embedding_model(self):
+        """Lazy loading for sentence embedding model"""
+        with self.lock:
+            if self.embedding_model is None:
+                logger.info("Loading sentence embedding model...")
+                self.embedding_model = SentenceTransformer(
+                    'all-MiniLM-L6-v2',
+                    cache_folder=str(MODEL_CACHE_DIR)
+                ).to("cuda" if torch.cuda.is_available() else "cpu")
+            return self.embedding_model
+
+    @staticmethod
+    def detect(text: str) -> str:
+        """Enhanced language detection with better fallback"""
+        if not text:
+            return "en"
+            
+        try:
+            # First try langdetect
+            lang = detect(text)
+            if lang in LANGUAGES:
+                return lang
+                
+            # Then try character-based detection
+            text = text.lower()
+            char_ranges = {
+                "hi": "अ-ह",
+                "es": "áéíóúñ¿¡",
+                "fr": "àâçéèêëîïôûùüÿ",
+                "de": "äöüß",
+                "ja": "あ-ん",
+                "zh": "你好谢谢再见",
+                "ru": "Привет спасибо до свидания",
+                "ar": "مرحبا شكرا وداعا",
+                "ko": "안녕하세요 감사합니다",
+                "sv": "äöå",
+                "pl": "ąćęłńóśźż",
+                "th": "ก-ฮ",
+                "vi": "ăâđêôơư",
+                "el": "α-ω",
+                "he": "א-ת"
+            }
+            
+            for lang_code, chars in char_ranges.items():
+                if any(char in text for char in chars):
+                    return lang_code
+                    
+            return "en"
+        except LangDetectException:
+            return "en"
+
+    async def translate(self, text: str, target_lang="en") -> str:  
+        """Enhanced translation between supported languages"""
+        if not text or target_lang not in LANGUAGES:  
+            return text  
+            
+        try:
+            # For languages we have special handling for
+            if target_lang == "en":
+                model, tokenizer = self.get_translation_model()
+                
+                inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
+                inputs = inputs.to(model.device)
+                
+                outputs = model.generate(**inputs)
+                translated = tokenizer.decode(outputs[0], skip_special_tokens=True)
+                
+                return f"[Translated from {LanguageProcessor.detect(text)}]: {translated}"
+            else:
+                # For other languages, use a placeholder (in a real app, you'd use a translation API)
+                return f"[Content would be translated to {LANGUAGES[target_lang]['name']}]: {text}"
+        except Exception as e:
+            logger.error(f"Translation failed: {str(e)}")
+            return text
+
+    def get_semantic_similarity(self, text1: str, text2: str) -> float:
+        """Calculate semantic similarity between two texts"""
+        model = self.get_embedding_model()
+        
+        embeddings = model.encode([text1, text2], convert_to_tensor=True)
+        similarity = F.cosine_similarity(embeddings[0].unsqueeze(0), embeddings[1].unsqueeze(0))
+        
+        return similarity.item()
+
+# ==================== ENHANCED MULTI-LLM ENGINE ====================
+
+class MultiLLMEngine:
+    def __init__(self):
+        self.llm_cache = {}
+        self.lock = Lock()
+        self.memory = ConversationBufferMemory()
+        self.task_history = []
+        self.vector_memory = None
+        self.embedding_model = None
+        self.retriever = None
+        self.adaptation_thread = None
+        self.stop_adaptation = Event()
+        logger.info("Initialized Enhanced Multi-LLM Engine")
+
+        # Initialize vector memory
+        self._init_vector_memory()
+        
+        # Start model adaptation thread
+        self.start_adaptation()
+
+    def _init_vector_memory(self):
+        """Initialize vector store for long-term memory"""
+        try:
+            # Use FAISS for efficient similarity search
+            self.embedding_model = SentenceTransformer(
+                'all-MiniLM-L6-v2',
+                cache_folder=str(MODEL_CACHE_DIR)
+            
+            index_path = KNOWLEDGE_BASE_DIR / "vector_memory.faiss"
+            if index_path.exists():
+                self.vector_memory = faiss.read_index(str(index_path))
+            else:
+                # Create new empty index
+                dimension = self.embedding_model.get_sentence_embedding_dimension()
+                self.vector_memory = faiss.IndexFlatL2(dimension)
+                
+            # Create retriever
+            self.retriever = VectorStoreRetrieverMemory(
+                vectorstore=self.vector_memory,
+                embedding_model=self.embedding_model
+            )
+        except Exception as e:
+            logger.error(f"Failed to initialize vector memory: {str(e)}")
+            self.vector_memory = None
+            self.retriever = None
+
+    def save_vector_memory(self):
+        """Save vector memory to disk"""
+        if self.vector_memory:
+            try:
+                faiss.write_index(self.vector_memory, str(KNOWLEDGE_BASE_DIR / "vector_memory.faiss"))
+            except Exception as e:
+                logger.error(f"Failed to save vector memory: {str(e)}")
+
+    def start_adaptation(self):
+        """Start background model adaptation"""
+        if self.adaptation_thread is None or not self.adaptation_thread.is_alive():
+            self.stop_adaptation.clear()
+            self.adaptation_thread = Thread(target=self._adapt_models, daemon=True)
+            self.adaptation_thread.start()
+            logger.info("Started model adaptation thread")
+
+    def stop_adaptation_thread(self):
+        """Stop the model adaptation thread"""
+        self.stop_adaptation.set()
+        if self.adaptation_thread and self.adaptation_thread.is_alive():
+            self.adaptation_thread.join(timeout=5)
+        self.save_vector_memory()
+
+    def _adapt_models(self):
+        """Continuously adapt models based on usage patterns"""
+        while not self.stop_adaptation.is_set():
+            try:
+                # Analyze recent tasks for adaptation
+                if self.task_history:
+                    recent_tasks = self.task_history[-100:]  # Last 100 tasks
+                    
+                    # Cluster tasks by similarity
+                    task_texts = [t["task"] for t in recent_tasks]
+                    embeddings = self.embedding_model.encode(task_texts)
+                    
+                    # Simple k-means clustering
+                    k = min(5, len(recent_tasks))
+                    if k > 1:
+                        kmeans = faiss.Kmeans(
+                            self.embedding_model.get_sentence_embedding_dimension(),
+                            k,
+                            niter=20
+                        )
+                        kmeans.train(embeddings)
+                        
+                        # For each cluster, identify the best performing model
+                        for i in range(k):
+                            cluster_indices = np.where(kmeans.index.search(embeddings, 1)[1] == i
+                            cluster_tasks = [recent_tasks[idx] for idx in cluster_indices[0]]
+                            
+                            # Find model with highest success rate in this cluster
+                            model_performance = {}
+                            for task in cluster_tasks:
+                                model = task.get("model", DEFAULT_LLM)
+                                success = task.get("success", True)
+                                model_performance[model] = model_performance.get(model, 0) + (1 if success else 0)
+                            
+                            if model_performance:
+                                best_model = max(model_performance.items(), key=lambda x: x[1])[0]
+                                logger.info(f"Cluster {i} best model: {best_model}")
+                                
+                                # Could implement model switching logic here
+                                
+                # Sleep before next adaptation cycle
+                self.stop_adaptation.wait(timeout=300)  # 5 minutes
+                
+            except Exception as e:
+                logger.error(f"Model adaptation failed: {str(e)}")
+                self.stop_adaptation.wait(timeout=60)  # Wait 1 minute before retry
+
+    def get_llm(self, model_name=DEFAULT_LLM):  
+        """Get LLM instance with better error handling and adaptive loading"""
+        with self.lock:  
+            cache_key = f"llm_{model_name}"
+            
+            if cache_key not in self.llm_cache:  
+                llm = model_manager.get_llm(model_name)  
+                if llm:  
+                    self.llm_cache[cache_key] = llm  
+                    
+                    # Preload related models in background
+                    if model_name in ["llava-next", "llava-1.6"]:
+                        model_manager.queue_model_load("llava", "llava", priority=2)
+                    
+            return self.llm_cache.get(cache_key)  
+
+    def select_best_model(self, prompt: str) -> str:
+        """Select the best model based on prompt analysis"""
+        # Simple keyword-based selection - could be enhanced with ML
+        prompt_lower = prompt.lower()
+        
+        # Check for model-specific strengths
+        for model, config in LLM_MODELS.items():
+            for strength in config.get("strengths", []):
+                if strength in prompt_lower:
+                    return model
+                    
+        # Default to most capable model that fits in context
+        max_length = len(prompt.split()) * 1.5  # Estimate token count
+        
+        suitable_models = [
+            (model, config) 
+            for model, config in LLM_MODELS.items()
+            if config.get("params", {}).get("max_length", 4096) >= max_length
+        ]
+        
+        if suitable_models:
+            # Prefer models with larger context windows
+            return max(suitable_models, key=lambda x: x[1]["params"]["max_length"])[0]
+            
+        return DEFAULT_LLM
+
+    async def generate(self, prompt: str, model_name=None, fallback_models=BACKUP_LLMS, max_retries=3) -> str:  
+        """Enhanced async text generation with better fallback and retry logic"""  
+        if model_name is None:
+            model_name = self.select_best_model(prompt)
+            
+        llm = self.get_llm(model_name)  
+        models_tried = [model_name]  
+        start_time = time.time()
+        
+        for attempt in range(max_retries):  
+            try:  
+                if not llm:  
+                    raise ValueError(f"Model {model_name} not available")  
+                      
+                # Add relevant memory to prompt
+                relevant_memory = self.retrieve_memory(prompt) if self.retriever else ""
+                enhanced_prompt = f"""
+                [Relevant Memory]:
+                {relevant_memory}
+                
+                [Current Task]:
+                {prompt}
+                """
+                
+                response = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: llm(enhanced_prompt)
+                )
+                
+                if response and len(response) > 30 and "sorry" not in response.lower():  
+                    # Store successful generation in memory
+                    self.store_memory(prompt, response)
+                    
+                    # Log successful generation
+                    self.task_history.append({
+                        "timestamp": datetime.now().isoformat(),
+                        "model": model_name,
+                        "task": prompt[:200],
+                        "response": response[:200],
+                        "success": True,
+                        "latency": time.time() - start_time
+                    })
+                    
+                    return clean_text(response)  
+                raise ValueError("Insufficient response quality")  
+            except Exception as e:  
+                logger.warning(f"Attempt {attempt+1} with {model_name} failed: {str(e)}")  
+                  
+                # Try next available model  
+                for fallback in fallback_models:  
+                    if fallback not in models_tried:  
+                        model_name = fallback  
+                        llm = self.get_llm(model_name)  
+                        models_tried.append(model_name)  
+                        break  
+                else:  
+                    break  
+        
+        # Log failure
+        self.task_history.append({
+            "timestamp": datetime.now().isoformat(),
+            "model": model_name,
+            "task": prompt[:200],
+            "error": str(e),
+            "success": False,
+            "latency": time.time() - start_time
+        })
+                      
+        return "I'm experiencing technical difficulties. Please try again later."  
+
+    def retrieve_memory(self, query: str, k=3) -> str:
+        """Retrieve relevant memories for a query"""
+        if not self.retriever:
+            return ""
+            
+        try:
+            results = self.retriever.get_relevant_documents(query, k=k)
+            return "\n".join([doc.page_content for doc in results])
+        except Exception as e:
+            logger.error(f"Memory retrieval failed: {str(e)}")
+            return ""
+
+    def store_memory(self, input_text: str, output_text: str):
+        """Store important information in long-term memory"""
+        if not self.retriever:
+            return
+            
+        try:
+            # Only store if the information seems valuable
+            if len(output_text) > 50 and not any(
+                word in output_text.lower() 
+                for word in ["error", "sorry", "can't", "don't know"]
+            ):
+                memory_text = f"Q: {input_text}\nA: {output_text}"
+                self.retriever.add_documents([memory_text])
+        except Exception as e:
+            logger.error(f"Failed to store memory: {str(e)}")
+
+    async def god_mode_generate(self, prompt: str, models=None) -> str:  
+        """Enhanced parallel generation from multiple LLMs"""  
+        models = models or ["deepseek-llm", "llama3-70b", "mixtral", "command-r-plus", "dolphin-2.9"]
+        responses = []  
+        
+        # Run all generations in parallel
+        tasks = [self.generate(prompt, model) for model in models]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        for model, result in zip(models, results):
+            if not isinstance(result, Exception):
+                responses.append(f"🔥 {model.upper()}:\n{result}\n")
+            else:
+                logger.error(f"God mode generation failed for {model}: {str(result)}")
+          
+        return "\n".join(responses) if responses else "All models failed to respond"
+        
+    async def autonomous_agent(self, task_description: str) -> str:
+        """Enhanced autonomous task execution with memory"""
+        prompt_template = """
+        You are an advanced autonomous AI agent. Your task is to:
+        1. Thoroughly analyze the task: {task}
+        2. Break it down into logical subtasks
+        3. Determine required resources/tools
+        4. Execute subtasks efficiently
+        5. Synthesize results
+        6. Return comprehensive final output
+        
+        Context:
+        - Current time: {time}
+        - Relevant memories: {memory}
+        - Previous steps: {history}
+        
+        Current step: {step}
+        """
+        
+        prompt = PromptTemplate(
+            input_variables=["task", "time", "memory", "history", "step"],
+            template=prompt_template
+        )
+        
+        llm_chain = LLMChain(
+            llm=self.get_llm(DEFAULT_LLM),
+            prompt=prompt,
+            memory=self.memory
+        )
+        
+        try:
+            # Retrieve relevant memories
+            memory_context = self.retrieve_memory(task_description)
+            
+            result = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: llm_chain.run({
+                    "task": task_description,
+                    "time": datetime.now().isoformat(),
+                    "memory": memory_context,
+                    "history": self.memory.buffer,
+                    "step": "Initial analysis"
+                })
+            )
+            
+            # Log the task
+            self.task_history.append({
+                "timestamp": datetime.now().isoformat(),
+                "task": task_description,
+                "result": result[:500] + "..." if len(result) > 500 else result,
+                "type": "autonomous"
+            })
+            
+            return result
+        except Exception as e:
+            logger.error(f"Autonomous agent failed: {str(e)}")
+            return f"Task execution failed: {str(e)}"
+
+# ==================== ENHANCED IMAGE PROCESSING ====================
+
+class ImageProcessor:
+    @staticmethod
+    def generate(
+        prompt: str, 
+        negative_prompt: str = "", 
+        init_image=None, 
+        mask_image=None, 
+        control_image=None,
+        control_type="canny",
+        strength=0.75,
+        num_inference_steps=50,
+        guidance_scale=9.0
+    ) -> Optional[Image.Image]:
+        """Advanced image generation with ControlNet support"""
+        try:
+            if control_image and control_type:
+                # ControlNet generation
+                pipe = model_manager.get_controlnet_pipeline()
+                
+                # Convert control image based on type
+                if control_type == "canny":
+                    control_array = np.array(control_image)
+                    control_array = cv2.Canny(control_array, 100, 200)
+                    control_image = Image.fromarray(control_array)
+                
+                image = pipe(
+                    prompt=prompt,
+                    negative_prompt=negative_prompt,
+                    image=control_image,
+                    num_inference_steps=num_inference_steps,
+                    guidance_scale=guidance_scale,
+                    controlnet_conditioning_scale=strength
+                ).images[0]
+            elif mask_image and init_image:
+                # Inpainting mode
+                pipe = model_manager.get_inpaint_pipeline()
+                image = pipe(
+                    prompt=prompt,
+                    negative_prompt=negative_prompt,
+                    image=Image.fromarray(init_image) if isinstance(init_image, np.ndarray) else init_image,
+                    mask_image=Image.fromarray(mask_image) if isinstance(mask_image, np.ndarray) else mask_image,
+                    strength=strength,
+                    guidance_scale=guidance_scale,
+                    num_inference_steps=num_inference_steps
+                ).images[0]
+            elif init_image:
+                # Image-to-image mode
+                pipe = model_manager.get_img2img_pipeline()
+                image = pipe(
+                    prompt=prompt,
+                    negative_prompt=negative_prompt,
+                    image=Image.fromarray(init_image) if isinstance(init_image, np.ndarray) else init_image,
+                    strength=strength,
+                    guidance_scale=guidance_scale,
+                    num_inference_steps=num_inference_steps
+                ).images[0]
+            else:
+                # Text-to-image mode
+                pipe = model_manager.get_sd_pipeline()
+                image = pipe(
+                    prompt=prompt,
+                    negative_prompt=negative_prompt or "text, signature, watermark, deformed, blurry, nsfw",
+                    num_inference_steps=num_inference_steps,
+                    guidance_scale=guidance_scale,
+                    width=1024,
+                    height=1024
+                ).images[0]
+
+            # Post-processing  
+            return ImageProcessor.enhance_quality(image)  
+        except torch.cuda.OutOfMemoryError:  
+            torch.cuda.empty_cache()  
+            return ImageProcessor.generate(
+                prompt, 
+                negative_prompt, 
+                init_image, 
+                mask_image,
+                control_image,
+                control_type,
+                strength,
+                num_inference_steps,
+                guidance_scale
+            )  
+        except Exception as e:  
+            logger.error(f"Image generation failed: {str(e)}")  
+            return None  
+
+    @staticmethod  
+    def upscale(image: Image.Image, factor=4) -> Image.Image:  
+        """Enhanced image upscaling with better error handling"""
+        try:
+            # Try diffusion upscaling first
+            pipe = model_manager.get_upscale_pipeline()
+            upscaled_image = pipe(
+                prompt="high quality, detailed, sharp",
+                image=image,
+                num_inference_steps=50
+            ).images[0]
+            
+            # Fallback to traditional methods if needed
+            if upscaled_image.size[0] < image.size[0] * factor:
+                logger.warning("Diffusion upscaling didn't achieve desired size, using traditional methods")
+                upscaled_image = image.resize(
+                    (image.width*factor, image.height*factor), 
+                    Image.LANCZOS
+                )
+                
+            return upscaled_image
+        except Exception as e:
+            logger.warning(f"Upscaling failed, using traditional method: {str(e)}")
+            return image.resize((image.width*factor, image.height*factor), Image.LANCZOS)  
+
+    @staticmethod
+    def enhance_quality(image: Image.Image) -> Image.Image:
+        """Apply quality enhancement to image with better error handling"""
+        try:
+            # First upscale
+            image = ImageProcessor.upscale(image)
+            
+            # Convert to array for OpenCV processing
+            img_array = np.array(image)
+            
+            # Convert to LAB color space for better contrast enhancement
+            lab = cv2.cvtColor(img_array, cv2.COLOR_BGR2LAB)
+            l, a, b = cv2.split(lab)
+            
+            # CLAHE (Contrast Limited Adaptive Histogram Equalization)
+            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
+            l = clahe.apply(l)
+            
+            # Merge channels and convert back to BGR
+            lab = cv2.merge((l,a,b))
+            img_array = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+            
+            # Sharpening with unsharp mask
+            blurred = cv2.GaussianBlur(img_array, (0,0), 3)
+            img_array = cv2.addWeighted(img_array, 1.5, blurred, -0.5, 0)
+            
+            # Color correction
+            img_array = cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB)
+            
+            return Image.fromarray(img_array)
+        except Exception as e:
+            logger.error(f"Image enhancement failed: {str(e)}")
+            return image
+
+    @staticmethod  
+    def process(image: Image.Image, operation: str) -> Image.Image:  
+        """Enhanced image processing with more operations"""
+        try:
+            img = np.array(image)  
+              
+            if operation == "edge_detection":  
+                result = cv2.Canny(img, 100, 200)  
+            elif operation == "cartoonify":  
+                # Convert to grayscale
+                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)  
+                gray = cv2.medianBlur(gray, 5)  
+                
+                # Detect edges
+                edges = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, 
+                                            cv2.THRESH_BINARY, 9, 9)  
+                
+                # Color quantization
+                color = cv2.bilateralFilter(img, 9, 300, 300)  
+                
+                # Combine edges with quantized color
+                result = cv2.bitwise_and(color, color, mask=edges)  
+            elif operation == "grayscale":  
+                result = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)  
+            elif operation == "enhance":  
+                # Contrast Limited Adaptive Histogram Equalization  
+                lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)  
+                l, a, b = cv2.split(lab)  
+                clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))  
+                l = clahe.apply(l)  
+                lab = cv2.merge((l,a,b))  
+                result = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)  
+            elif operation == "super_resolution":
+                result = ImageProcessor.upscale(Image.fromarray(img))
+                return result
+            elif operation == "oil_painting":
+                result = cv2.xphoto.oilPainting(img, 7, 1)
+            elif operation == "pencil_sketch":
+                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                inverted = cv2.bitwise_not(gray)
+                blurred = cv2.GaussianBlur(inverted, (21, 21), 0)
+                result = cv2.divide(gray, 255 - blurred, scale=256)
+            elif operation == "watercolor":
+                # Apply bilateral filter multiple times
+                result = cv2.bilateralFilter(img, 9, 75, 75)
+                result = cv2.bilateralFilter(result, 9, 75, 75)
+            elif operation == "hdr":
+                # Tone mapping for HDR effect
+                tonemap = cv2.createTonemapReinhard(1.5, 0.5, 0.5, 0.5)
+                result = tonemap.process(img.astype(np.float32) * 255
+                result = result.astype(np.uint8)
+            else:  
+                result = img  
+                  
+            return Image.fromarray(result)
+        except Exception as e:
+            logger.error(f"Image processing failed: {str(e)}")
+            return image
+
+    @staticmethod  
+    def caption(image: Image.Image) -> str:  
+        """Enhanced image captioning with better error handling"""
+        try:  
+            processor, model = model_manager.get_blip_model()  
+            inputs = processor(images=image, return_tensors="pt").to("cuda" if torch.cuda.is_available() else "cpu")  
+            outputs = model.generate(**inputs)  
+            return processor.decode(outputs[0], skip_special_tokens=True)  
+        except Exception as e:  
+            logger.error(f"Image captioning failed: {str(e)}")  
+            return "Could not generate caption for this image"
+            
+    @staticmethod
+    def visual_qa(image: Image.Image, question: str) -> str:
+        """Enhanced visual question answering"""
+        try:
+            pipe = model_manager.get_llava_model()
+            result = pipe(image, question)
+            return result[0]['generated_text']
+        except Exception as e:
+            logger.error(f"Visual QA failed: {str(e)}")
+            return "Could not answer question about this image"
+            
+    @staticmethod
+    def extract_text(image: Image.Image) -> str:
+        """Enhanced OCR text extraction from images"""
+        try:
+            # Use pytesseract if available
+            try:
+                import pytesseract
+                return pytesseract.image_to_string(np.array(image))
+            except ImportError:
+                logger.warning("pytesseract not available, using fallback OCR")
+                
+                # Fallback to easyocr if available
+                try:
+                    import easyocr
+                    reader = easyocr.Reader(['en'])
+                    results = reader.readtext(np.array(image))
+                    return "\n".join([res[1] for res in results])
+                except ImportError:
+                    logger.warning("No OCR libraries available")
+                    return "Install pytesseract or easyocr for OCR functionality"
+        except Exception as e:
+            logger.error(f"OCR failed: {str(e)}")
+            return "Could not extract text from image"
+
+# ==================== ENHANCED AUDIO PROCESSING ====================
+
+class AudioProcessor:
+    @staticmethod
+    def text_to_speech(
+        text: str, 
+        lang="en", 
+        speed=1.0, 
+        personality="professional",
+        voice_sample=None
+    ) -> Optional[str]:
+        """Enhanced TTS with voice cloning and effects"""
+        try:
+            if not text:
+                return None
+
+            # Truncate very long texts
+            if len(text) > 1000:
+                text = text[:1000] + "... [truncated]"
+
+            timestamp = str(int(time.time()))  
+            output_file = str(TEMP_DIR / f"reply_{timestamp}.wav")  
+            
+            # Apply personality effects  
+            personality_config = PERSONALITIES.get(personality, {})
+            if personality == "chad":  
+                text = f"Listen up, bro. {text} 🏋️♂️"  
+            elif personality == "sarcastic":  
+                text = f"Oh great, another request. {text} 😏"  
+            elif personality == "dark":  
+                text = f"In this meaningless void... {text} 💀"  
+            elif personality == "hacker":
+                text = f"[HACKER VOICE ACTIVATED] {text} 01010100 01110010 01100001 01101110 01110011 01101101 01101001 01110011 01110011 01101001 01101111 01101110 00100000 01100011 01101111 01101101 01110000 01101100 01100101 01110100 01100101"
+            elif personality == "god":
+                text = f"BEHOLD MORTALS! {text.upper()}"
+            elif personality == "pirate":
+                text = f"Arrr matey! {text} ☠️"
+            elif personality == "wizard":
+                text = f"By the ancient spells... {text} ✨"
+            elif personality == "detective":
+                text = f"Elementary, my dear Watson. {text} 🕵️‍♂️"
+            elif personality == "chef":
+                text = f"Today's special is... {text} 👨‍🍳"
+            elif personality == "titan":
+                text = f"[TITAN MODE ACTIVATED] {text} ⚡"
+
+            tts = model_manager.get_tts_model()  
+            
+            # Use provided voice sample or default for language
+            speaker_wav = None
+            if voice_sample and os.path.exists(voice_sample):
+                speaker_wav = voice_sample
+            else:
+                default_voice = VOICE_SAMPLES_DIR / f"{lang}_voice.wav"
+                if default_voice.exists():
+                    speaker_wav = str(default_voice)
+                else:
+                    speaker_wav = str(VOICE_SAMPLES_DIR / "en_voice.wav")
+
+            tts.tts_to_file(  
+                text=text,  
+                file_path=output_file,  
+                speaker_wav=speaker_wav,  
+                language=lang,  
+                speed=speed  
+            )  
+              
+            AudioProcessor.enhance_audio(output_file)  
+            return output_file  
+        except Exception as e:  
+            logger.error(f"TTS failed: {str(e)} - Falling back to pyttsx3")  
+            try:  
+                engine = pyttsx3.init()  
+                engine.setProperty('rate', 150 * speed)  
+                engine.save_to_file(text[:500], output_file)  
+                engine.runAndWait()  
+                return output_file  
+            except Exception as e:  
+                logger.error(f"pyttsx3 fallback failed: {str(e)}")  
+                return None  
+
+    @staticmethod  
+    def enhance_audio(input_file: str):
+        """Enhanced audio processing with effects"""
+        try:
+            sound = AudioSegment.from_file(input_file)
+            
+            # Noise reduction
+            sound = sound.low_pass_filter(3000).high_pass_filter(200)
+            
+            # Normalize volume
+            sound = sound.normalize()
+            
+            # Compress dynamic range
+            sound = sound.compress_dynamic_range()
+            
+            # Add slight reverb for more natural sound
+            sound = sound.fade_in(50).fade_out(50)
+            
+            # Export enhanced audio
+            sound.export(input_file, format="wav", parameters=["-acodec", "pcm_s16le"])
+        except Exception as e:
+            logger.warning(f"Audio enhancement failed: {str(e)}")
+
+    @staticmethod  
+    def speech_to_text(audio_file: str, language="auto") -> str:  
+        """Enhanced speech recognition with language detection"""
+        try:  
+            model = model_manager.get_whisper_model()  
+            
+            # Load audio with noise reduction
+            audio = whisper.load_audio(audio_file)
+            audio = whisper.pad_or_trim(audio)
+            
+            # Detect language if auto
+            if language == "auto":
+                mel = whisper.log_mel_spectrogram(audio).to(model.device)
+                _, probs = model.detect_language(mel)
+                language = max(probs, key=probs.get)
+                logger.info(f"Detected language: {language} with probability {probs[language]:.2f}")
+            
+            # Enhanced processing
+            result = model.transcribe(
+                audio,
+                temperature=0.2,
+                best_of=5,
+                beam_size=5,
+                suppress_tokens=[-1],
+                initial_prompt="Transcribe accurately with punctuation and capitalization.",
+                language=language if language != "auto" else None
+            )
+            
+            return clean_text(result["text"])  
+        except Exception as e:  
+            logger.error(f"Speech recognition failed: {str(e)}")  
+            return "Could not understand audio"
+
+    @staticmethod
+    def clone_voice(reference_audio: str, output_dir=VOICE_SAMPLES_DIR, lang="en") -> bool:
+        """Create a voice clone from reference audio"""
+        try:
+            if not os.path.exists(reference_audio):
+                raise FileNotFoundError(f"Audio file not found: {reference_audio}")
+                
+            # Create output directory if needed
+            output_dir.mkdir(exist_ok=True)
+            
+            # Process the audio
+            output_file = output_dir / f"{lang}_voice.wav"
+            
+            # Load and enhance the audio
+            audio = AudioSegment.from_file(reference_audio)
+            audio = audio.set_channels(1).set_frame_rate(22050)
+            audio.export(output_file, format="wav")
+            
+            logger.info(f"Voice sample saved to {output_file}")
+            return True
+        except Exception as e:
+            logger.error(f"Voice cloning failed: {str(e)}")
+            return False
+
+# ==================== ENHANCED J.A.R.V.I.S. CORE ====================
+
+class JARVISCore:
+    def __init__(self):
+        self.personality = "professional"
+        self.god_mode = False
+        self.dark_mode = False
+        self.active_tasks = []
+        self.memory = {}
+        self.llm_engine = MultiLLMEngine()
+        self.learning_mode = False
+        self.knowledge_base = {}
+        self.security_mode = True
+        self.voice_clone_mode = False
+        self.current_voice_sample = None
+        self.config = load_config()
+        self.plugins = {}
+        self.api_server = None
+        self.file_watcher = None
+        logger.info("J.A.R.V.I.S. Core initialized in TITAN MODE")
+
+        # Load plugins
+        self._load_plugins()
+        
+        # Start API server
+        self._start_api_server()
+        
+        # Start config file watcher
+        self._start_config_watcher()
+
+    def _load_plugins(self):
+        """Load additional functionality plugins"""
+        plugins_dir = BASE_DIR / "plugins"
+        plugins_dir.mkdir(exist_ok=True)
+        
+        # Load from plugins directory
+        for plugin_file in plugins_dir.glob("*.py"):
+            try:
+                plugin_name = plugin_file.stem
+                spec = importlib.util.spec_from_file_location(plugin_name, plugin_file)
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                
+                # Initialize plugin
+                if hasattr(module, "Plugin"):
+                    self.plugins[plugin_name] = module.Plugin(self)
+                    logger.info(f"Loaded plugin: {plugin_name}")
+            except Exception as e:
+                logger.error(f"Failed to load plugin {plugin_file}: {str(e)}")
+
+    def _start_api_server(self):
+        """Start FastAPI server for external access"""
+        try:
+            app = FastAPI(title="NEXA AI API", version=VERSION)
+            
+            @app.get("/api/query")
+            async def process_query(query: str):
+                return await self.process_query(query)
+                
+            @app.post("/api/voice")
+            async def process_voice(file: UploadFile):
+                with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+                    temp_file.write(await file.read())
+                    return {"text": AudioProcessor.speech_to_text(temp_file.name)}
+            
+            @app.get("/api/status")
+            async def get_status():
+                return {
+                    "status": "online",
+                    "version": VERSION,
+                    "personality": self.personality,
+                    "memory_items": len(self.memory),
+                    "active_tasks": len(self.active_tasks)
+                }
+            
+            # Mount static files
+            app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+            
+            # Run in background
+            nest_asyncio.apply()
+            config = uvicorn.Config(
+                app, 
+                host="0.0.0.0", 
+                port=int(os.getenv("API_PORT", "8000")),
+                log_level="warning"
+            )
+            self.api_server = uvicorn.Server(config)
+            
+            async def run_server():
+                await self.api_server.serve()
+                
+            Thread(target=lambda: asyncio.run(run_server()), daemon=True).start()
+            logger.info("API server started")
+        except Exception as e:
+            logger.error(f"Failed to start API server: {str(e)}")
+
+    def _start_config_watcher(self):
+        """Watch for config file changes"""
+        class ConfigHandler(FileSystemEventHandler):
+            def __init__(self, core):
+                self.core = core
+                
+            def on_modified(self, event):
+                if event.src_path.endswith("config.yaml"):
+                    logger.info("Config file modified, reloading...")
+                    self.core.reload_config()
+                    
+        self.file_watcher = Observer()
+        handler = ConfigHandler(self)
+        self.file_watcher.schedule(handler, path=str(BASE_DIR), recursive=False)
+        self.file_watcher.start()
+        logger.info("Config file watcher started")
+
+    def reload_config(self):
+        """Reload configuration from file"""
+        try:
+            new_config = load_config()
+            changes = []
+            
+            # Check for personality changes
+            if new_config.get("personality") != self.config.get("personality"):
+                self.set_personality(new_config.get("personality", "professional"))
+                changes.append(f"personality to {new_config['personality']}")
+                
+            # Update other settings
+            self.config = new_config
+            model_manager.config = new_config
+            
+            if changes:
+                logger.info(f"Config reloaded: Changed {', '.join(changes)}")
+            else:
+                logger.info("Config reloaded (no significant changes)")
+        except Exception as e:
+            logger.error(f"Config reload failed: {str(e)}")
+
+    def set_personality(self, personality: str) -> str:  
+        """Set personality with validation and effects"""
+        if personality in PERSONALITIES:  
+            self.personality = personality  
+            
+            # Apply personality-specific settings
+            personality_config = PERSONALITIES[personality]
+            
+            # Update config
+            self.config["personality"] = personality
+            save_config(self.config)
+            
+            return f"Personality set to {personality} {personality_config['emoji']}"  
+        return "Invalid personality"  
+
+    def toggle_god_mode(self, enabled: bool) -> str:  
+        """Toggle god mode with validation"""
+        self.god_mode = enabled  
+        return f"God Mode {'ACTIVATED 🔥' if enabled else 'deactivated'}"  
+
+    def toggle_dark_mode(self, enabled: bool) -> str:  
+        """Toggle dark mode with validation"""
+        if enabled and not is_tor_available() and self.security_mode:
+            return "Tor proxy not available! Dark mode requires Tor"
+            
+        self.dark_mode = enabled  
+        return f"Dark Mode {'ENABLED 💀' if enabled else 'disabled'}"  
+        
+    def toggle_learning(self, enabled: bool) -> str:
+        """Toggle learning mode"""
+        self.learning_mode = enabled
+        return f"Learning Mode {'ACTIVATED 🧠' if enabled else 'deactivated'}"
+        
+    def toggle_security(self, enabled: bool) -> str:
+        """Toggle security mode (prevents certain risky operations)"""
+        self.security_mode = enabled
+        return f"Security Mode {'ACTIVATED 🔒' if enabled else 'deactivated'}"
+        
+    def toggle_voice_clone(self, enabled: bool) -> str:
+        """Toggle voice cloning mode"""
+        self.voice_clone_mode = enabled
+        if enabled and not self.current_voice_sample:
+            return "Voice clone mode enabled but no voice sample set"
+        return f"Voice Clone Mode {'ACTIVATED 🎤' if enabled else 'deactivated'}"
+
+    def set_voice_sample(self, audio_file: str) -> str:
+        """Set voice sample for cloning"""
+        if not os.path.exists(audio_file):
+            return "Audio file not found"
+            
+        self.current_voice_sample = audio_file
+        return f"Voice sample set from {os.path.basename(audio_file)}"
+
+    async def execute_task(self, task_description: str) -> str:  
+        """Enhanced autonomous task execution with security checks"""
+        if self.security_mode:
+            # Check for dangerous commands
+            dangerous_commands = [
+                "delete", "remove", "format", "shutdown", 
+                "restart", "kill", "stop", "rm -rf", 
+                "drop table", "insert into", "update", 
+                "alter table", "chmod 777", "sudo"
+            ]
+            
+            if any(cmd in task_description.lower() for cmd in dangerous_commands):
+                return "⚠️ Security mode prevents execution of potentially dangerous tasks"
+            
+            # Check for dark web access
+            if "dark web" in task_description.lower() and not self.dark_mode:
+                return "Dark web access requires dark mode to be enabled"
+            
+        task_id = f"task_{int(time.time())}"  
+        self.active_tasks.append(task_id)  
+        
+        if self.learning_mode:
+            self.learn_from_task(task_description)
+          
+        # Enhanced task execution with different capabilities
+        if "search" in task_description.lower() or "find" in task_description.lower():  
+            result = f"🔍 Search completed for: {task_description}\n{await WebScraper.search(task_description, dark_mode=self.dark_mode)[:2000]}..."
+        elif "scrape" in task_description.lower() or "extract" in task_description.lower():  
+            result = f"🕷️ Web scraping completed: {task_description}\n{await self.enhanced_scrape(task_description)}"
+        elif "generate image" in task_description.lower() or "create picture" in task_description.lower():
+            prompt = task_description.replace("generate image", "").replace("create picture", "").strip()
+            image = ImageProcessor.generate(prompt)
+            if image:
+                image_path = str(TEMP_DIR / f"generated_{task_id}.png")
+                image.save(image_path)
+                result = f"🎨 Image generated and saved to {image_path}"
+            else:
+                result = "Failed to generate image"
+        elif "execute code" in task_description.lower():
+            if self.security_mode:
+                result = "⚠️ Security mode prevents code execution"
+            else:
+                result = await self.execute_code(task_description)
+        elif "remember" in task_description.lower():
+            key = task_description.split("remember")[1].split("as")[0].strip()
+            value = task_description.split("as")[1].strip()
+            self.memory[key] = value
+            result = f"🧠 Remembered '{key}' as '{value}'"
+        elif "what do you know about" in task_description.lower():
+            key = task_description.split("about")[1].strip()
+            result = self.memory.get(key, f"I don't know anything about {key}")
+        elif "voice clone" in task_description.lower():
+            if "current voice" in task_description.lower() and self.current_voice_sample:
+                success = AudioProcessor.clone_voice(self.current_voice_sample)
+                result = "Voice cloned successfully!" if success else "Voice cloning failed"
+            else:
+                result = "No voice sample set for cloning"
+        else:  
+            result = await self.llm_engine.autonomous_agent(task_description)
+              
+        self.active_tasks.remove(task_id)  
+        return result  
+        
+    def learn_from_task(self, task_description: str):
+        """Enhanced self-learning mechanism"""
+        if "learn" in task_description.lower() or "remember" in task_description.lower():
+            try:
+                # Extract knowledge
+                knowledge = self.llm_engine.generate(
+                    f"Extract key knowledge from this task: {task_description}. "
+                    "Return only the concise knowledge points."
+                )
+                
+                # Generate embedding for the knowledge
+                embedding = LanguageProcessor().get_embedding_model().encode(knowledge)
+                
+                # Store in knowledge base with embedding
+                key = f"knowledge_{len(self.knowledge_base)+1}"
+                self.knowledge_base[key] = {
+                    "text": knowledge,
+                    "embedding": embedding,
+                    "timestamp": datetime.now().isoformat()
+                }
+                
+                logger.info(f"Learned new knowledge: {knowledge}")
+            except Exception as e:
+                logger.error(f"Learning failed: {str(e)}")
+
+    async def enhanced_scrape(self, url: str) -> str:
+        """Enhanced web scraping with JavaScript rendering and security checks"""
+        if self.security_mode:
+            # Check for dark web domains
+            if ".onion" in url.lower() and not self.dark_mode:
+                return "Dark web scraping requires dark mode to be enabled"
+            
+            # Check for suspicious domains
+            suspicious_domains = [
+                ".exe", ".bat", ".sh", ".php", 
+                "hack", "exploit", "malware"
+            ]
+            
+            if any(domain in url.lower() for domain in suspicious_domains):
+                return "Security blocked access to suspicious domain"
+            
+        try:
+            options = Options()
+            options.add_argument("--headless")
+            options.add_argument("--disable-gpu")
+            options.add_argument("--no-sandbox")
+            options.add_argument("--disable-dev-shm-usage")
+            options.add_argument(f"user-agent={random.choice(WebScraper.USER_AGENTS)}")
+            
+            if self.dark_mode and ".onion" in url.lower():
+                if not is_tor_available():
+                    return "Tor proxy not available for dark web access"
+                options.add_argument(f'--proxy-server={TOR_PROXY}')
+            
+            # Run Selenium in a separate thread
+            def run_selenium():
+                driver = webdriver.Chrome(options=options)
+                try:
+                    driver.get(url if url.startswith("http") else f"https://{url}")
+                    
+                    # Wait for page to load
+                    WebDriverWait(driver, 10).until(
+                        EC.presence_of_element_located((By.TAG_NAME, "body"))
+                    
+                    # Get all text content
+                    text = driver.find_element(By.TAG_NAME, "body").text
+                    
+                    # Take screenshot
+                    screenshot_path = str(TEMP_DIR / f"screenshot_{int(time.time())}.png")
+                    driver.save_screenshot(screenshot_path)
+                    
+                    return text, screenshot_path
+                finally:
+                    driver.quit()
+                    
+            loop = asyncio.get_event_loop()
+            text, screenshot_path = await loop.run_in_executor(None, run_selenium)
+            
+            return f"Scraped text (first 2000 chars): {text[:2000]}...\nScreenshot saved to {screenshot_path}"
+        except Exception as e:
+            return f"Scraping failed: {str(e)}"
+
+    async def execute_code(self, code_description: str) -> str:
+        """Enhanced code execution with security checks"""
+        if self.security_mode:
+            return "⚠️ Security mode prevents code execution"
+            
+        try:
+            # Generate code from description
+            code = await self.llm_engine.generate(
+                f"Generate Python code to: {code_description}. "
+                "Return only the code block with no explanations."
+            )
+            
+            # Clean the code
+            code = re.sub(r'```python|```', '', code).strip()
+            
+            # Security check - block dangerous operations
+            dangerous_patterns = [
+                r'os\.system\(',
+                r'subprocess\.(run|call|Popen)\(',
+                r'eval\(',
+                r'exec\(',
+                r'open\(',
+                r'__import__\(',
+                r'pickle\.load\(',
+                r'requests\.(get|post)\(',
+                r'socket\.',
+                r'shutil\.',
+                r'rmtree\(',
+                r'write\('
+            ]
+            
+            if any(re.search(pattern, code) for pattern in dangerous_patterns):
+                return "⚠️ Code contains potentially dangerous operations and was blocked"
+            
+            # Create a restricted globals dictionary
+            safe_globals = {
+                '__builtins__': {
+                    'range': range,
+                    'len': len,
+                    'str': str,
+                    'int': int,
+                    'float': float,
+                    'list': list,
+                    'dict': dict,
+                    'tuple': tuple,
+                    'set': set,
+                    'bool': bool,
+                    'print': print,
+                    'sum': sum,
+                    'min': min,
+                    'max': max,
+                    'abs': abs,
+                    'round': round
+                },
+                'math': __import__('math'),
+                'datetime': __import__('datetime'),
+                'random': __import__('random'),
+                'json': __import__('json'),
+                're': __import__('re')
+            }
+            
+            # Execute in a safe environment
+            local_vars = {}
+            exec(code, safe_globals, local_vars)
+            
+            # Capture output
+            output = "\n".join([
+                str(v) for k, v in local_vars.items() 
+                if not k.startswith('_') and not callable(v)
+            ])
+            
+            return f"Code executed successfully:\n```python\n{code}\n```\nOutput:\n{output}"
+        except Exception as e:
+            return f"Code execution failed: {str(e)}"
+
+    async def process_query(
+        self, 
+        input_text: str, 
+        lang="auto", 
+        gen_image=False, 
+        input_image=None, 
+        mask_image=None, 
+        img_strength=0.75, 
+        doc_file=None, 
+        audio_input=None, 
+        img_operation=None, 
+        visual_question=None,
+        control_image=None,
+        control_type="canny"
+    ) -> Dict[str, Union[str, Image.Image, None]]:  
+        """Enhanced main processing pipeline with better error handling"""
+        start_time = time.time()  
+        results = {  
+            "text": "",  
+            "voice": None,  
+            "image": None,  
+            "summary": "",  
+            "html": "",  
+            "caption": "",
+            "visual_qa": ""
+        }  
+
+        try:  
+            # Process audio input  
+            if audio_input:  
+                input_text = AudioProcessor.speech_to_text(audio_input)  
+                if not input_text:  
+                    input_text = "Could not understand audio input"  
+
+            # Process document input  
+            doc_text = ""  
+            if doc_file:  
+                doc_text = DocumentProcessor.extract_text(doc_file.name)  
+                input_text = f"{input_text}\n\n[Document Content]:\n{doc_text[:3000]}"  
+
+            # Auto-detect language  
+            if lang == "auto":  
+                lang = LanguageProcessor.detect(input_text)  
+
+            # Visual question answering
+            if input_image and visual_question:
+                results["visual_qa"] = ImageProcessor.visual_qa(input_image, visual_question)
+                return results
+
+            # Image processing mode  
+            if input_image and img_operation:  
+                results["image"] = ImageProcessor.process(input_image, img_operation)  
+                results["caption"] = ImageProcessor.caption(results["image"])  
+                return results  
+
+            # Image generation mode  
+            if gen_image and input_text:  
+                results["image"] = ImageProcessor.generate(  
+                    prompt=input_text,  
+                    init_image=input_image,  
+                    mask_image=mask_image,  
+                    control_image=control_image,
+                    control_type=control_type,
+                    strength=img_strength  
+                )  
+                results["caption"] = ImageProcessor.caption(results["image"])  
+                return results  
+
+            # Web scraping for context  
+            context = await WebScraper.search(input_text, lang, self.dark_mode)  
+
+            # Generate AI response  
+            prompt = f"""  
+            [User Query]: {input_text}  
+            [Language]: {lang}  
+            [Personality]: {self.personality}  
+            [Web Context]: {context[:3000]}  
+              
+            Instructions:  
+            1. Analyze the query and context thoroughly  
+            2. Provide a detailed, well-structured response  
+            3. Include relevant examples and actionable advice  
+            4. Format with markdown (headings, lists, etc.)  
+            5. Respond in the user's language ({lang})  
+            6. Add personality: {PERSONALITIES[self.personality]['tone']}  
+            7. If technical, include code examples  
+            8. If creative, be imaginative  
+            9. If factual, cite sources  
+            10. If ambiguous, ask clarifying questions  
+              
+            Response:  
+            """  
+
+            if self.god_mode:  
+                response = await self.llm_engine.god_mode_generate(prompt)  
+            else:  
+                response = await self.llm_engine.generate(prompt)  
+
+            results["text"] = response  
+
+            # Generate summary  
+            summary_prompt = f"Summarize this in 3 bullet points in {lang} with {self.personality} tone:\n{response}"  
+            results["summary"] = await self.llm_engine.generate(summary_prompt)  
+
+            # Convert to HTML  
+            results["html"] = markdown_to_html(response)  
+
+            # Voice response  
+            if lang in LANGUAGES:  
+                voice_sample = self.current_voice_sample if self.voice_clone_mode else None
+                results["voice"] = AudioProcessor.text_to_speech(  
+                    response if len(response) < 500 else results["summary"],  
+                    lang=lang,  
+                    personality=self.personality,
+                    voice_sample=voice_sample
+                )  
+
+            logger.info(f"Processed query in {time.time()-start_time:.2f}s")  
+            return results  
+
+        except Exception as e:  
+            logger.error(f"Processing failed: {str(e)}")  
+            results["text"] = "An error occurred while processing your request. Please try again."  
+            return results
+
+# ==================== ENHANCED GRADIO INTERFACE ====================
+
+class NexaAITitanInterface:
+    def __init__(self):
+        self.jarvis = JARVISCore()
+        self.app = self._create_interface()
+        self.running = True
+        self.cleanup_thread = Thread(target=self._periodic_cleanup, daemon=True)
+        self.cleanup_thread.start()
+
+    def _periodic_cleanup(self):
+        """Periodically clean up resources"""
+        while self.running:
+            time.sleep(300)  # 5 minutes
+            clear_memory()
+            
+            # Clean up old temp files
+            now = time.time()
+            for file in TEMP_DIR.glob("*"):
+                if os.stat(file).st_mtime < now - 3600:  # Older than 1 hour
+                    try:
+                        file.unlink()
+                    except Exception as e:
+                        logger.warning(f"Could not delete {file}: {str(e)}")
+
+    def _create_interface(self):  
+        with gr.Blocks(  
+            title=VERSION,  
+            theme=gr.themes.Soft(primary_hue="blue"),  
+            css="""  
+            .gradio-container { max-width: 2000px !important; }  
+            footer {visibility: hidden}  
+            .tab { padding: 15px; border-radius: 10px; background: #f9f9f9; }  
+            .output-html { max-height: 800px; overflow-y: auto; }  
+            .dark-mode { background-color: #1a1a1a !important; color: #e0e0e0 !important; }  
+            .titan-mode { 
+                background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); 
+                color: white;
+                border: 1px solid #00FFFF;
+            }
+            .markdown-image {
+                max-width: 100%;
+                border-radius: 8px;
+                box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            }
+            .personality-selector {
+                border-radius: 10px;
+                padding: 10px;
+                margin: 5px;
+            }
+            .personality-selector:hover {
+                transform: scale(1.02);
+                transition: transform 0.2s;
+            }
+            """  
+        ) as app:  
+            gr.Markdown(f"""  
+            <center>  
+                <h1>⚡ {VERSION} ⚡</h1>  
+                <p>THE ULTIMATE MULTIMODAL AI ASSISTANT WITH TITAN MODE</p>  
+                <img src="https://i.imgur.com/JZ5X3zG.gif" width="300">  
+            </center>  
+            """)  
+
+            # Personality Controls  
+            with gr.Row():  
+                with gr.Column(scale=1):  
+                    personality = gr.Dropdown(  
+                        choices=list(PERSONALITIES.keys()),  
+                        value="professional",  
+                        label="🔥 PERSONALITY MODE",  
+                        interactive=True  
+                    )  
+                    god_mode = gr.Checkbox(label="💀 GOD MODE (MULTI-LLM)", value=False)  
+                    dark_mode = gr.Checkbox(label="🌑 DARK WEB MODE (TOR REQUIRED)", value=False)  
+                    learning_mode = gr.Checkbox(label="🧠 LEARNING MODE", value=False)
+                    security_mode = gr.Checkbox(label="🔒 SECURITY MODE", value=True)
+                    voice_clone_mode = gr.Checkbox(label="🎤 VOICE CLONE MODE", value=False)
+                with gr.Column(scale=1):  
+                    lang_dropdown = gr.Dropdown(  
+                        choices=["auto"] + list(LANGUAGES.keys()),  
+                        value="auto",  
+                        label="Response Language"  
+                    )  
+                    llm_dropdown = gr.Dropdown(  
+                        choices=list(LLM_MODELS.keys()),  
+                        value=DEFAULT_LLM,  
+                        label="Primary AI Model"  
+                    )  
+                    speed_slider = gr.Slider(0.5, 2.0, value=1.0, label="Voice Speed")  
+                    voice_sample = gr.Audio(source="microphone", type="filepath", label="Set Voice Sample")
+
+            # Main Input Area  
+            with gr.Row():  
+                input_text = gr.Textbox(  
+                    label="ASK OR COMMAND ME",  
+                    placeholder="e.g., 'Explain quantum physics', 'Hey Nexa, scrape data', or 'Generate cyberpunk art'",  
+                    lines=5,  
+                    max_lines=10  
+                )  
+
+            # File Uploads  
+            with gr.Row():  
+                doc_upload = gr.File(label="📄 Upload Document (PDF, DOCX, TXT, CSV, EPUB)")  
+                audio_input = gr.Audio(source="microphone", type="filepath", label="🎤 Voice Input")  
+                image_upload = gr.Image(label="🖼️ Upload Image", type="pil")  
+
+            # Action Buttons  
+            with gr.Row():  
+                submit_btn = gr.Button("🚀 EXECUTE", variant="primary", size="lg")  
+                clear_btn = gr.Button("🧹 CLEAR", size="lg")  
+                image_check = gr.Checkbox(label="🎨 GENERATE IMAGE?", value=False)  
+                task_btn = gr.Button("🤖 EXECUTE TASK", variant="secondary", size="lg")  
+
+            # Output Tabs  
+            with gr.Tabs():  
+                with gr.Tab("💬 Text Output"):  
+                    text_output = gr.Textbox(label="NEXA'S RESPONSE", interactive=False)  
+                    summary_output = gr.Textbox(label="📝 SUMMARY", interactive=False)  
+                    html_output = gr.HTML(label="✨ FORMATTED OUTPUT", elem_classes="output-html")  
+
+                with gr.Tab("🎤 Voice Output"):  
+                    voice_output = gr.Audio(label="🔊 VOICE REPLY", autoplay=True)  
+
+                with gr.Tab("🖼️ Image Output"):  
+                    image_output = gr.Image(label="GENERATED IMAGE")  
+                    caption_output = gr.Textbox(label="IMAGE CAPTION", interactive=False)  
+
+                with gr.Tab("⚙️ Image Studio"):  
+                    with gr.Row():  
+                        with gr.Column(scale=1):  
+                            img_prompt = gr.Textbox(label="Image Prompt", lines=2)  
+                            negative_prompt = gr.Textbox(  
+                                label="Negative Prompt",  
+                                value="text, signature, watermark, deformed, blurry, nsfw"  
+                            )  
+                            img_strength = gr.Slider(0.1, 1.0, value=0.75, label="Transformation Strength")  
+                            init_image = gr.Image(label="Initial Image", type="pil")  
+                            mask_image = gr.Image(label="Mask Image", type="pil", tool="sketch")  
+                            control_image = gr.Image(label="Control Image", type="pil")  
+                            control_type = gr.Dropdown(
+                                choices=["canny", "depth", "pose", "scribble"],
+                                value="canny",
+                                label="Control Type"
+                            )
+                            img_gen_btn = gr.Button("Generate Image", variant="primary")  
+                        with gr.Column(scale=1):  
+                            studio_output = gr.Image(label="Generated Image")  
+                            studio_caption = gr.Textbox(label="Image Caption")  
+                            img_operation = gr.Dropdown(  
+                                choices=["edge_detection", "cartoonify", "grayscale", "enhance", 
+                                        "super_resolution", "oil_painting", "pencil_sketch",
+                                        "watercolor", "hdr"],
+                                label="Image Processing"  
+                            )  
+                            img_process_btn = gr.Button("Process Image", variant="secondary")  
+
+                with gr.Tab("🔍 Visual QA"):  
+                    with gr.Row():  
+                        with gr.Column():  
+                            visual_question = gr.Textbox(label="Question About Image")  
+                            vqa_btn = gr.Button("Ask About Image", variant="primary")  
+                        with gr.Column():  
+                            vqa_output = gr.Textbox(label="Visual Answer", interactive=False)  
+
+                with gr.Tab("📊 System Monitor"):  
+                    with gr.Row():  
+                        with gr.Column():  
+                            sys_info = gr.Textbox(label="System Information", interactive=False, lines=10)  
+                            task_log = gr.Textbox(label="Active Tasks", interactive=False)  
+                        with gr.Column():  
+                            logs_display = gr.Textbox(label="Recent Logs", interactive=False, lines=15)  
+                    refresh_btn = gr.Button("🔄 Refresh System Info")  
+
+            # Event Handlers  
+            personality.change(  
+                fn=self.jarvis.set_personality,  
+                inputs=personality,  
+                outputs=text_output  
+            )  
+              
+            god_mode.change(  
+                fn=self.jarvis.toggle_god_mode,  
+                inputs=god_mode,  
+                outputs=text_output  
+            )  
+              
+            dark_mode.change(  
+                fn=self.jarvis.toggle_dark_mode,  
+                inputs=dark_mode,  
+                outputs=text_output  
+            )
+            
+            learning_mode.change(
+                fn=self.jarvis.toggle_learning,
+                inputs=learning_mode,
+                outputs=text_output
+            )
+            
+            security_mode.change(
+                fn=self.jarvis.toggle_security,
+                inputs=security_mode,
+                outputs=text_output
+            )
+            
+            voice_clone_mode.change(
+                fn=self.jarvis.toggle_voice_clone,
+                inputs=voice_clone_mode,
+                outputs=text_output
+            )
+            
+            voice_sample.change(
+                fn=self.jarvis.set_voice_sample,
+                inputs=voice_sample,
+                outputs=text_output
+            )
+
+            submit_btn.click(  
+                fn=self.jarvis.process_query,  
+                inputs=[  
+                    input_text,  
+                    lang_dropdown,  
+                    image_check,  
+                    image_upload,  
+                    mask_image,  
+                    img_strength,  
+                    doc_upload,  
+                    audio_input,  
+                    img_operation,  
+                    visual_question,
+                    control_image,
+                    control_type
+                ],  
+                outputs=[  
+                    text_output,  
+                    voice_output,  
+                    image_output,  
+                    summary_output,  
+                    html_output,  
+                    caption_output,
+                    vqa_output
+                ]  
+            )  
+            
+            task_btn.click(
+                fn=self.jarvis.execute_task,
+                inputs=input_text,
+                outputs=text_output
+            )
+
+            clear_btn.click(  
+                lambda: ["", "", None, "", "", "", ""],  
+                outputs=[  
+                    text_output,  
+                    voice_output,  
+                    image_output,  
+                    summary_output,  
+                    html_output,  
+                    caption_output,
+                    vqa_output
+                ]  
+            )  
+
+            img_gen_btn.click(  
+                fn=lambda p, n, i, m, c, ct, s: {  
+                    "image": ImageProcessor.generate(p, n, i, m, c, ct, s),  
+                    "caption": ImageProcessor.caption(ImageProcessor.generate(p, n, i, m, c, ct, s))  
+                },  
+                inputs=[img_prompt, negative_prompt, init_image, mask_image, control_image, control_type, img_strength],  
+                outputs=[studio_output, studio_caption]  
+            )  
+
+            img_process_btn.click(  
+                fn=lambda i, o: {  
+                    "image": ImageProcessor.process(i, o),  
+                    "caption": ImageProcessor.caption(ImageProcessor.process(i, o))  
+                },  
+                inputs=[init_image, img_operation],  
+                outputs=[studio_output, studio_caption]  
+            )  
+            
+            vqa_btn.click(
+                fn=lambda i, q: {"visual_qa": ImageProcessor.visual_qa(i, q)},
+                inputs=[image_upload, visual_question],
+                outputs=vqa_output
+            )
+
+            refresh_btn.click(  
+                fn=self._get_system_info,  
+                outputs=[sys_info, task_log, logs_display]  
+            )  
+
+            # Examples  
+            gr.Examples(  
+                examples=[  
+                    ["Explain quantum computing to a 5 year old", "professional", False],  
+                    ["Generate cyberpunk city at night with neon lights", "sarcastic", True],  
+                    ["Scrape latest AI research papers from arXiv", "hacker", False],  
+                    ["मोदी जी के बारे में latest news in Hindi", "chad", False],  
+                    ["未来の都市の絵を生成してください", "anime", True],
+                    ["Execute Python code to scrape a website and save results to CSV", "professional", False],
+                    ["What's in this image?", "professional", False],
+                    ["Remember that my favorite color is blue", "professional", False],
+                    ["What do you know about my favorite color?", "professional", False],
+                    ["Clone my voice from this sample", "professional", False],
+                    ["Generate an image using this edge map as control", "professional", True]
+                ],  
+                inputs=[input_text, personality, image_check],  
+                label="TRY THESE EXAMPLES:"  
+            )  
+
+        return app  
+
+    def _get_system_info(self):  
+        """Enhanced system information with more details"""
+        try:
+            # Get GPU memory info if available
+            gpu_mem = ""
+            if torch.cuda.is_available():
+                allocated = torch.cuda.memory_allocated() / 1024**3
+                reserved = torch.cuda.memory_reserved() / 1024**3
+                total = torch.cuda.get_device_properties(0).total_memory / 1024**3
+                gpu_mem = f"\n- GPU Memory: {allocated:.2f}GB allocated / {reserved:.2f}GB reserved / {total:.2f}GB total"
+            
+            # Get disk space
+            total, used, free = shutil.disk_usage("/")
+            
+            sys_info = f"""  
+            ⚙️ SYSTEM STATUS - {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}  
+            - Version: {VERSION}  
+            - Personality: {self.jarvis.personality}  
+            - God Mode: {'ACTIVE 🔥' if self.jarvis.god_mode else 'inactive'}  
+            - Dark Mode: {'ACTIVE 💀' if self.jarvis.dark_mode else 'inactive'}  
+            - Learning Mode: {'ACTIVE 🧠' if self.jarvis.learning_mode else 'inactive'}
+            - Security Mode: {'ACTIVE 🔒' if self.jarvis.security_mode else 'inactive'}
+            - Voice Clone Mode: {'ACTIVE 🎤' if self.jarvis.voice_clone_mode else 'inactive'}
+            - GPU: {torch.cuda.get_device_name() if torch.cuda.is_available() else 'CPU only'}  
+            {gpu_mem}
+            - Disk Space: {used/1024**3:.1f}GB used / {free/1024**3:.1f}GB free / {total/1024**3:.1f}GB total
+            - Knowledge Base: {len(self.jarvis.knowledge_base)} facts learned  
+            - Memory Items: {len(self.jarvis.memory)}  
+            - Tasks Completed: {len(self.jarvis.llm_engine.task_history)}  
+            - API Server: {'Running' if self.jarvis.api_server else 'Stopped'}
+            """  
+              
+            task_log = "ACTIVE TASKS:\n" + "\n".join(self.jarvis.active_tasks) if self.jarvis.active_tasks else "No active tasks"  
+              
+            # Read last 15 lines from log file  
+            try:  
+                with open(LOG_FILE, 'r', encoding='utf-8') as f:  
+                    logs = f.readlines()[-15:]  
+            except Exception as e:  
+                logs = [f"Logs unavailable: {str(e)}"]  
+                  
+            return sys_info, task_log, "".join(logs)
+        except Exception as e:
+            logger.error(f"Failed to get system info: {str(e)}")
+            return "System info unavailable", "Task log unavailable", "Logs unavailable"
+
+    def launch(self):  
+        """Enhanced launch with better initialization"""
+        try:
+            logger.info(f"🚀 Starting {VERSION} in TITAN MODE")  
+              
+            # Clear temp directory
+            for file in TEMP_DIR.glob("*"):
+                try:
+                    file.unlink()
+                except Exception as e:
+                    logger.warning(f"Could not delete {file}: {str(e)}")
+              
+            # Preload models in background  
+            Thread(target=model_manager._preload_models, daemon=True).start()  
+              
+            self.app.launch(  
+                server_name="0.0.0.0",  
+                server_port=int(os.getenv("PORT", "7860")),  
+                share=bool(os.getenv("SHARE", False)),  
+                favicon_path="favicon.ico" if os.path.exists("favicon.ico") else None,
+                inbrowser=True
+            )
+        except Exception as e:
+            logger.error(f"Failed to launch interface: {str(e)}")
+            raise
+        finally:
+            self.running = False
+            self.jarvis.llm_engine.stop_adaptation_thread()
+            if self.jarvis.file_watcher:
+                self.jarvis.file_watcher.stop()
+                self.jarvis.file_watcher.join()
+            if self.jarvis.api_server:
+                self.jarvis.api_server.should_exit = True
+
+# ==================== MAIN EXECUTION ====================
+
+if __name__ == "__main__":
+    print(f"""
+███╗   ██╗███████╗██╗  ██╗ █████╗
+████╗  ██║██╔════╝╚██╗██╔╝██╔══██╗
+██╔██╗ ██║█████╗   ╚███╔╝ ╚█████╔╝
+██║╚██╗██║██╔══╝   ██╔██╗ ██╔══██╗
+██║ ╚████║███████╗██╔╝ ██╗╚█████╔╝
+╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝ ╚════╝
+{VERSION}
+    """)
+
+    # Check for Tor availability
+    if is_tor_available():
+        print("🔥 Tor proxy detected - Dark Web mode available")
+    else:
+        print("⚠️ Tor proxy not found - Dark Web mode limited")
+
+    # Check GPU availability
+    if torch.cuda.is_available():
+        print(f"🚀 GPU detected: {torch.cuda.get_device_name(0)}")
+        print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.2f}GB")
+    else:
+        print("⚠️ Running in CPU-only mode - performance may be limited")
+
+    try:
+        interface = NexaAITitanInterface()  
+        interface.launch()
+    except Exception as e:
+        print(f"Fatal error: {str(e)}")
+        logger.critical(f"Application crashed: {str(e)}")
