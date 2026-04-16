@@ -1,21 +1,18 @@
 # nexa-beast-ai
-# 🚀 NEXA BEAST AI
-⚠️ This project might use heavy GPU resources.
+##  NEXA BEAST AI
+
+> I think I just built something dangerous 💀
 
 An all-in-one AI system that can:
--  Chat like llm models 
+- 💬 Chat like llm
 - 🎨 Generate images
-- 🎤 Understand voice
+- 🎙 Understand voice
 - 🌐 Scrape the web
-- also dark web 💀
 - ⚡ Automate tasks
 
-This is an experimental JARVIS-like AI built for fun and exploration.
+⚠️ Warning: This might use heavy GPU resources
 
----
-
-## 🔥 Demo
-Coming soon...
+Built for fun. Open sourced for devs 🚀
 
 ---
 
