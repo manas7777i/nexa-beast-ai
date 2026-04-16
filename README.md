@@ -19,12 +19,6 @@ Coming soon...
 
 ---
 
-## ⚙️ Installation
-
-```bash
-pip install -r requirements.txt
-python app.py
-
 *Features*
 Multiple AI personalities
 Text + Image + Voice support
@@ -37,3 +31,9 @@ Feel free to fork and contribute!
 
 ⚠️ Disclaimer
 This is a fun experimental project. Not production ready.
+
+## ⚙️ Installation
+
+```bash
+pip install -r requirements.txt
+python app.py
